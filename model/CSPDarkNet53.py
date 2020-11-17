@@ -14,7 +14,7 @@ def resblock(input,filter,i,j):
 class CSPDarkNet53(object):
     def __init__(self,args,num_classes=None,include_top=False):
         self.batch_size = args.batch_size
-        self.input_shape = [args.img_h,args.img_w,3]
+        self.input_shape = [args.img_size,args.img_size,3]
         self.filter = [64,128,256,512,1024]
         self.res_iter = [1,2,8,8,4]
         self.include_top = include_top
@@ -84,8 +84,7 @@ if __name__== '__main__':
 
     parser = argparse.ArgumentParser(description='Darknet53 implementation.')
     parser.add_argument('--batch_size', type=int, help = 'size of batch', default=4)
-    parser.add_argument('--img_h',              type=int,   help='input height', default=512)
-    parser.add_argument('--img_w',               type=int,   help='input width', default=512)
+    parser.add_argument('--img_size',              type=int,   help='input height', default=512)
     args = parser.parse_args()
     darknet = CSPDarkNet53(args,1000)
     darknet.model.summary()
