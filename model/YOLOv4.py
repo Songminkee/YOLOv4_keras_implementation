@@ -2,37 +2,30 @@ from util import *
 from model import CSPDarkNet53
 
 class YOLOv4(object):
-    def __init__(self,args,stride=None,anchor=None,sigmoid_scale=None):
+    def __init__(self,args,hyp,stride=None,anchor=None,sigmoid_scale=None):
         if stride:
             self.stride = stride
         else:
-            self.stride=self.default_stride()
+            self.stride=default_stride()
 
         if anchor:
             self.anchor = anchor
         else:
-            self.anchor = self.default_anchor()
+            self.anchor = default_anchor()
 
         if sigmoid_scale:
             self.sigmoid_scale = sigmoid_scale
         else:
-            self.sigmoid_scale = self.default_sigmoid_scale()
-
+            self.sigmoid_scale = default_sigmoid_scale()
+        self.gr = 1.0
+        self.hyp = hyp
+        self.soft = args.soft
         self.anchors = make_anchor(self.stride,self.anchor)
         self.num_classes = args.num_classes
         self.backbone = CSPDarkNet53.CSPDarkNet53(args).model
         self.box_feature = self.head(self.backbone.output)
         self.out = self.pred(self.box_feature)
-        self.model = tf.keras.Model(self.backbone.input,self.out)
-
-    def default_stride(self):
-        return np.array([8,16,32])
-
-    def default_anchor(self):
-        return np.array([12, 16, 19, 36, 40, 28, 36, 75, 76, 55, 72, 146, 142, 110, 192, 243, 459, 401])
-
-    def default_sigmoid_scale(self):
-        return np.array([1.2, 1.1, 1.05])
+        self.model = tf.keras.Model(inputs=self.backbone.input,outputs=self.out)
 
     def head(self,backbone_out):
         r3,r2,r1 = backbone_out
@@ -65,34 +58,87 @@ class YOLOv4(object):
     def pred(self,boxes):
         pred = []
         for i,box in enumerate(boxes):
-            box_shape = tf.shape(box)
+            box_shape = box.shape
 
-            box = tf.reshape(box,(box_shape[0],box_shape[1],box_shape[2],3,self.num_classes+5))
+            box = tf.reshape(box,(-1,box_shape[1],box_shape[2],3,self.num_classes+5))
 
             conf,xy,wh,cls = tf.split(box,([1,2,2,self.num_classes]),-1)
-
             shape = tf.shape(xy)
 
             xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1])) # w,h
             xy_grid = tf.expand_dims(tf.stack(xy_grid,-1),2)
             xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [shape[0], 1, 1, 3, 1]),tf.float32) # b,h,w,3,2
 
-            pred_xy = (tf.sigmoid(xy)*self.sigmoid_scale[i]-0.5*(self.sigmoid_scale[i]-1)+xy_grid)*self.stride[i]
+            pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])+xy_grid)
             pred_wh = tf.exp(wh)*self.anchor[i]
-            pred_xywh = tf.concat([pred_xy,pred_wh],-1)
 
             pred_cls = tf.sigmoid(cls)
             pred_conf = tf.sigmoid(conf)
-            pred.append(tf.concat([pred_xywh,pred_conf,pred_cls],-1))
+            pred.append(tf.concat([pred_conf,pred_xy,pred_wh,pred_cls],-1))
 
         return pred
 
+    def loss(self,box_label,out):
+        bce = tf.keras.losses.BinaryCrossentropy(False, reduction=tf.keras.losses.Reduction.NONE)
+        cp,cn = smoothing_value(self.num_classes,self.soft)
+        iou_loss, object_loss, class_loss = 0, 0, 0
+        for i in range(3):
+            scaler = label_scaler(out[i])
+            label = box_label*scaler
+            mask,idx,label = build_target(self.anchors[i],label,self.hyp)
+
+            c_label, box = tf.split(label,[1,4],-1)
+
+            pred = tf.gather_nd(out[i],idx)
+            conf,xywh,cls = tf.split(pred,[1,4,self.num_classes],-1)
+
+            # get giou or ciou or diou
+            iou = get_iou_loss(xywh,box) # [b,max_label,3,1]
+
+            # get obj(confidence) loss by iou
+            l_obj = tf.expand_dims(bce((1.0-self.gr) + self.gr*iou,conf),-1) # [b,max_label,3,1]
+
+            # get class_loss
+            c_label = tf.one_hot(tf.cast(tf.squeeze(c_label),tf.int32), self.num_classes, on_value=cp, off_value=cn)
+            l_cls = tf.expand_dims(bce(c_label,cls),-1) # [b,max_label,3,1]
+
+            mask_num = tf.reduce_sum(tf.cast(mask,tf.float32))
+            l_iou = tf.reduce_sum(tf.where(mask,1-iou,0))/mask_num
+            l_obj = tf.reduce_sum(tf.where(mask,l_obj,0))/mask_num
+            l_cls = tf.reduce_sum(tf.where(mask,l_cls,0))/mask_num
+
+            iou_loss += l_iou
+            object_loss += l_obj
+            class_loss += l_cls
+
+        loss = iou_loss*self.hyp['giou'] + object_loss * self.hyp['obj'] + class_loss * self.hyp['cls']
+        return loss
+
 if __name__== '__main__':
     import argparse
+
+    hyp = {'giou': 3.54,  # giou loss gain
+           'cls': 37.4,  # cls loss gain
+           'obj': 64.3,  # obj loss gain (*=img_size/320 if img_size != 320)
+           'iou_t': 0.213,  # iou training threshold
+           'lr0': 0.01,  # initial learning rate (SGD=5E-3, Adam=5E-4)
+           'lrf': 0.0005,  # final learning rate (with cos scheduler)
+           'momentum': 0.949,  # SGD momentum
+           'weight_decay': 0.000484,  # optimizer weight decay
+           'fl_gamma': 0.0,  # focal loss gamma (efficientDet default is gamma=1.5)
+           'hsv_h': 0.0138,  # image HSV-Hue augmentation (fraction)
+           'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)
+           'hsv_v': 0.36,  # image HSV-Value augmentation (fraction)
+           'degrees': 1.98 * 0,  # image rotation (+/- deg)
+           'translate': 0.05 * 0,  # image translation (+/- fraction)
+           'scale': 0.5,  # image scale (+/- gain)
+           'shear': 0.641 * 0}  # image shear (+/- deg)
+
+
     parser = argparse.ArgumentParser(description='YOLOv4 implementation.')
     parser.add_argument('--batch_size', type=int, help = 'size of batch', default=4)
     parser.add_argument('--img_size',              type=int,   help='input height', default=512)
-    parser.add_argument('--num_classes', type=int, help='number of class', default=1000)
+    parser.add_argument('--num_classes', type=int, help='number of class', default=80)
     args = parser.parse_args()
     YOLO = YOLOv4(args)
     YOLO.model.summary()

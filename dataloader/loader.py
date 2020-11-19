@@ -15,11 +15,14 @@ class DataLoader(tf.keras.utils.Sequence):
         self.mosaic = args.mosaic
         self.augment = args.augment
         self.img_size = args.img_size
-        self.images_path,self.labels_path = load_coco_image_label_files(args.data_root,args.mode)
+        self.max_label=90
+        self.images_path,self.labels_path = load_coco_image_label_files(args.data_root,mode)
         self.indices = np.arange(len(self.images_path))
+
 
     def load_image(self,index):
         img = cv2.imread(self.images_path[index])
+
         h0, w0 = img.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # resize image to img_size
         if r < 1 or (self.augment and r != 1):  # always resize down, only resize up if training with augmentation
@@ -65,6 +68,9 @@ class DataLoader(tf.keras.utils.Sequence):
         left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
         img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
         return img, ratio, (dw, dh)
+
+    def __call__(self):
+        return self
 
     def augment_hsv(self,img, hgain=0.5, sgain=0.5, vgain=0.5):
         r = np.random.uniform(-1, 1, 3) * [hgain, sgain, vgain] + 1  # random gains
@@ -155,8 +161,10 @@ class DataLoader(tf.keras.utils.Sequence):
         s = self.img_size
         xc, yc = [int(random.uniform(s * 0.5, s * 1.5)) for _ in range(2)]  # mosaic center x, y
 
-        indices = [index] + [random.randint(0, len(self.indices) - 1) for _ in range(3)]  # 3 additional image indices
-
+        indices = random.sample(range(len(self.indices)),3)  # 3 additional image indices
+        while index in indices:
+            indices = random.sample(range(len(self.indices)),3)
+        indices = [index] + indices
         for i, index in enumerate(indices):
             # Load image
             img, _, (h, w) = self.load_image(index)
@@ -205,16 +213,21 @@ class DataLoader(tf.keras.utils.Sequence):
                                       shear=self.hyp['shear'],
                                       border=-s // 2)  # border to remove
         return img4, labels4
+    def get_anchors(self):
+        self.stride = default_stride()
+        self.anchor = default_anchor()
+        self.anchors = make_anchor(self.stride,self.anchor)
 
     def on_epoch_end(self):
         self.indices = np.arange(len(self.images_path))
-        if self.shuffle == True:
+        if self.is_shuffle:
             np.random.shuffle(self.indices)
 
     def __len__(self):
         return len(self.images_path)
 
     def __getitem__(self, index):
+        now_index=index
         index = self.indices[index]
         if self.mosaic:
             img, label = self.load_mosaic(index)
@@ -242,10 +255,13 @@ class DataLoader(tf.keras.utils.Sequence):
             if random.random() < 0.5:
                 img = np.flipud(img)
                 label[:,2] = 1-label[:,2]
+
         img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-        label = np.concatenate([np.zeros((label.shape[0], 1)), label], -1)
-        label[0]=index
-        return img,label
+        label_out = np.zeros([self.max_label,5])
+        label_out[:label.shape[0]]=label
+        if now_index==len(self)-1:
+            self.on_epoch_end()
+        return img,label_out
 
 hyp = {'giou': 3.54,  # giou loss gain
        'cls': 37.4,  # cls loss gain
@@ -290,14 +306,14 @@ if __name__== '__main__':
     print(len(dataset))
     for img,label in dataset:
         shape = img.shape
-        print(shape)
-        print(label[:,0])
+        # print(shape)
+        # print(label)
         for l in label:
             #print(l)
-            x1 = int(shape[0] * (l[2] - l[4] / 2) + 0.5)
-            y1 = int(shape[1] * (l[3] - l[5] / 2) + 0.5)
-            x2 = int(shape[0] * (l[2] + l[4] / 2) + 0.5)
-            y2 = int(shape[1] * (l[3] + l[5] / 2) + 0.5)
+            x1 = int(shape[0] * (l[1] - l[3] / 2) + 0.5)
+            y1 = int(shape[1] * (l[2] - l[4] / 2) + 0.5)
+            x2 = int(shape[0] * (l[1] + l[3] / 2) + 0.5)
+            y2 = int(shape[1] * (l[2] + l[4] / 2) + 0.5)
             img = cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0))
         plt.imshow(img)
         plt.show()

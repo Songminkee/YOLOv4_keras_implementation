@@ -25,7 +25,7 @@ class CSPDarkNet53(object):
         model = self.backbone()
         if not self.include_top:
             return model
-        return tf.keras.Model(model.input,self.head(model.output))
+        return tf.keras.Model(inputs=model.input,outputs=self.head(model.output))
 
     def backbone(self):
         input = tf.keras.layers.Input(shape=(self.input_shape[0], self.input_shape[1], 3))
