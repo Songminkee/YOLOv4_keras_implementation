@@ -62,12 +62,13 @@ def train(args,hyp):
 
         YOLO.model.optimizer.apply_gradients(zip(gradients, YOLO.model.trainable_variables))
 
-        if global_step==args.accum_steps:
+        if global_step % args.accum_steps == 0:
             accum_gradient = [this_grad/args.accum_steps for this_grad in accum_gradient]
             YOLO.model.optimizer.apply_gradients(zip(accum_gradient, YOLO.model.trainable_variables))
             if args.summary and args.summary_variable:
-                for var in YOLO.model.trainable_variables():
-                    tf.summary.histogram(var.op_name,var)
+                with writer.as_default():
+                    for var in YOLO.model.trainable_variables:
+                        tf.summary.histogram(var.name, var, step=global_step)
 
         # learning rate schedule
         global_step.assign_add(1)
@@ -97,17 +98,18 @@ def train(args,hyp):
             train_vars = YOLO.model.trainable_variables
             accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
 
+        # train step
         for images, labels in train_set:
             loss_val = train_step(images, labels,YOLO,accum_gradient)
-
         time_sofar = (time.time() - start_time) / 3600
         training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
 
-
         print("=> Epoch:%4d | Train STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (epoch,global_step.numpy(), loss_val,time_sofar,training_time_left))
 
+        # validation step
         for val_images, val_labels in val_set:
             loss_val = test_step(val_images, val_labels,YOLO)
+            break
 
         time_sofar = (time.time() - start_time) / 3600
         training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
@@ -122,10 +124,9 @@ def train(args,hyp):
 if __name__== '__main__':
     import argparse
 
-
     parser = argparse.ArgumentParser(description='Darknet53 implementation.')
     parser.add_argument('--batch_size', type=int, help = 'size of batch', default=2)
-    parser.add_argument('--accum_steps', type=int, default=8)
+    parser.add_argument('--accum_steps', type=int, default=32)
     parser.add_argument('--img_size',              type=int,   help='input height', default=512)
     parser.add_argument('--data_root',              type=str,   help='', default='./data')
     parser.add_argument('--class_file',              type=str,   help='', default='coco.names')
