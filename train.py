@@ -1,84 +1,114 @@
+# Disable tf log
 import os
 os.environ['TF_CPP_MIN_VLOG_LEVEL'] = '3'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import tensorflow as tf
 import tensorflow_addons as tfa
 from model import YOLOv4
 from dataloader import loader
-from tensorflow.keras import backend as K
-from tensorflow.keras.callbacks import TensorBoard
-
+import numpy as np
+import time
 
 print(tf.config.experimental.list_physical_devices('GPU'))
-class LRTensorBoard(TensorBoard):
-    def __init__(self, log_dir, **kwargs):  # add other arguments to __init__ if you need
-        super().__init__(log_dir=log_dir, **kwargs)
-
-    def on_epoch_end(self, epoch, logs=None):
-        logs = logs or {}
-        logs.update({'lr': K.eval(self.model.optimizer.lr)})
-        super().on_epoch_end(epoch, logs)
-
-@tf.function
-def train_step(images, labels,model):
-    with tf.GradientTape() as tape:
-        pred = model(images)
-        loss_val = model.loss(labels,pred)
-    gradients = tape.gradient(loss_val, model.trainable_variables)
-    model.optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
-
 
 def train(args,hyp):
     physical_devices = tf.config.experimental.list_physical_devices('GPU')
     if len(physical_devices) > 0:
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
-    YOLO = YOLOv4.YOLOv4(args,hyp)
 
     train_set = loader.DataLoader(args, hyp,'train')
-    steps_per_epoch = len(train_set)
-    train_set = tf.data.Dataset.from_generator(loader.DataLoader(args, hyp,'train'),(tf.float32,tf.float32))
-    val_set = tf.data.Dataset.from_generator(loader.DataLoader(args, hyp,'val'),(tf.float32,tf.float32))
-    train_set=train_set.batch(args.batch_size).repeat(1)
+    val_set = loader.DataLoader(args, hyp, 'val')
+
+    steps_per_epoch = int(np.ceil(len(train_set) / args.batch_size))
+    global_step = tf.Variable(1, trainable=False, dtype=tf.int64)
+    warmup_steps = args.warmup_epochs * steps_per_epoch
+    total_steps = (args.warmup_epochs+args.epochs) * steps_per_epoch
+
+    train_set = tf.data.Dataset.from_generator(train_set,(tf.float32,tf.float32))
+    train_set = train_set.batch(args.batch_size).repeat(1)
+
+    val_set = tf.data.Dataset.from_generator(val_set,(tf.float32,tf.float32))
     val_set=val_set.batch(args.batch_size).repeat(1)
 
-    global_step = tf.Variable(1, trainable = False, dtype=tf.int64)
-    warmup_steps = args.warmup_epoch * steps_per_epoch
+    YOLO = YOLOv4.YOLOv4(args, hyp)
+    if args.weight_path!='':
+        print('load_model from {}'.format(args.weight_path))
+        YOLO.model.load_weights(args.weight_path)
 
-    EPOCHS = 5
-    YOLO.model.compile(optimizer=tfa.optimizers.SGDW(learning_rate=hyp['lr0'], weight_decay=hyp['weight_decay'],
+    if not os.path.exists(args.weight_save_path):
+        os.makedirs(args.weight_save_path)
+    YOLO.model.compile(optimizer=tfa.optimizers.SGDW(learning_rate=0., weight_decay=hyp['weight_decay'],
                                                      momentum=hyp['momentum']))
-    # TODO:
-    # for epoch in range(EPOCHS):
-    #     for images, labels in train_set:
-    #         train_step(images, labels)
-    # 
-    #     for test_images, test_labels in val_set:
-    #         test_step(test_images, test_labels)
 
+    @tf.function
+    def train_step(images, labels, YOLO, accum_gradient):
+        with tf.GradientTape() as tape:
+            pred = YOLO.model(images)
+            loss_val = YOLO.loss(labels, pred)
 
+        gradients = tape.gradient(loss_val, YOLO.model.trainable_variables)
+        accum_gradient = [(acum_grad+grad) for acum_grad,grad in zip(accum_gradient,gradients)]
 
-    YOLO.model.fit(train_set,batch_size=4,epochs=1,validation_data=val_set)
+        YOLO.model.optimizer.apply_gradients(zip(gradients, YOLO.model.trainable_variables))
 
-    # cnt=0
-    # for img,label in val_set.as_numpy_iterator():
-    #     out = YOLO.model(img)
-    #     loss = YOLO.loss(label,out)
-    #     cnt+=1
-    #     if cnt==2:
-    #         break
-    #
-    # for img,label in val_set.as_numpy_iterator():
-    #     out = YOLO.model(img)
-    #     ret = YOLO.loss(label, out)
+        if global_step==args.accum_steps:
+            accum_gradient = [this_grad/args.accum_steps for this_grad in accum_gradient]
+            YOLO.model.optimizer.apply_gradients(zip(accum_gradient, YOLO.model.trainable_variables))
 
-    #YOLO.model.optimizer.lr.assign()
+        # learning rate schedule
+        global_step.assign_add(1)
+        if global_step < warmup_steps:
+            lr = global_step / warmup_steps * hyp['lr0']
+        else:
+            lr = hyp['lrf'] + 0.5 * ( hyp['lr0'] - hyp['lrf']) * (
+                (1 + tf.cos((global_step - warmup_steps) / (total_steps - warmup_steps) * np.pi))
+            )
+        YOLO.model.optimizer.lr.assign(tf.cast(lr, tf.float32))
+        return loss_val
+
+    @tf.function
+    def test_step(images, labels,YOLO):
+        pred = YOLO.model(images)
+        loss_val = YOLO.loss(labels, pred)
+        return loss_val
+
+    train_vars = YOLO.model.trainable_variables
+    accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
+    start_time = time.time()
+    for epoch in range(args.warmup_epochs+args.epochs):
+        if (global_step-1) % args.accum_steps==0:
+            train_vars = YOLO.model.trainable_variables
+            accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
+
+        for images, labels in train_set:
+            loss_val = train_step(images, labels,YOLO,accum_gradient)
+        time_sofar = (time.time() - start_time) / 3600
+        training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
+
+        if global_step%10==0:
+            print("=> Epoch:%4d | Train STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (epoch,global_step, loss_val,time_sofar,training_time_left))
+
+        for val_images, val_labels in val_set:
+            loss_val = test_step(val_images, val_labels,YOLO)
+
+        time_sofar = (time.time() - start_time) / 3600
+        training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
+
+        if global_step % 10 == 0:
+            print("=> Epoch:%4d | VAL STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (
+        epoch, global_step, loss_val, time_sofar, training_time_left))
+            YOLO.model.save_weights(args.weight_save_path + '/{}'.format(epoch))
+
+    YOLO.model.save_weights(args.weight_save_path+'/final')
+
 
 if __name__== '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Darknet53 implementation.')
-    parser.add_argument('--batch_size', type=int, help = 'size of batch', default=4)
+    parser.add_argument('--batch_size', type=int, help = 'size of batch', default=2)
+    parser.add_argument('--accum_steps', type=int, default=8)
     parser.add_argument('--img_size',              type=int,   help='input height', default=512)
     parser.add_argument('--data_root',              type=str,   help='', default='./data')
     parser.add_argument('--class_file',              type=str,   help='', default='coco.names')
@@ -86,9 +116,11 @@ if __name__== '__main__':
     parser.add_argument('--augment',              action='store_false',   help='')
     parser.add_argument('--mosaic', action='store_false', help='')
     parser.add_argument('--is_shuffle', action='store_false', help='')
-    parser.add_argument('--epoch', type=int,default=30 )
-    parser.add_argument('--warmup_epoch', type=int, default=2)
+    parser.add_argument('--epochs', type=int,default=300 )
+    parser.add_argument('--warmup_epochs', type=int, default=2)
     parser.add_argument('--soft',type=float,default=0.0)
+    parser.add_argument('--weight_path',type=str,default='')
+    parser.add_argument('--weight_save_path', type=str, default='./weight')
     parser.add_argument('--mode',
                         default='train',
                         const='train',

@@ -15,7 +15,7 @@ class DataLoader(tf.keras.utils.Sequence):
         self.mosaic = args.mosaic
         self.augment = args.augment
         self.img_size = args.img_size
-        self.max_label=90
+        self.max_label=120
         self.images_path,self.labels_path = load_coco_image_label_files(args.data_root,mode)
         self.indices = np.arange(len(self.images_path))
 
