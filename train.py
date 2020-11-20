@@ -37,15 +37,25 @@ def train(args,hyp):
         YOLO.model.load_weights(args.weight_path)
 
     if not os.path.exists(args.weight_save_path):
+
         os.makedirs(args.weight_save_path)
     YOLO.model.compile(optimizer=tfa.optimizers.SGDW(learning_rate=0., weight_decay=hyp['weight_decay'],
                                                      momentum=hyp['momentum']))
+
+    if args.summary:
+        print('Summary will be stored in {} \n You can check the learning contents with the command "tensorboard --logdir {}"'.format(args.log_path,args.log_path))
+        writer = tf.summary.create_file_writer(args.log_path)
 
     @tf.function
     def train_step(images, labels, YOLO, accum_gradient):
         with tf.GradientTape() as tape:
             pred = YOLO.model(images)
-            loss_val = YOLO.loss(labels, pred)
+            if args.summary:
+                loss_val = YOLO.loss(labels, pred,step = global_step,writer=writer)
+                with writer.as_default():
+                    tf.summary.scalar("learning rate", YOLO.model.optimizer.lr, step=global_step)
+            else:
+                loss_val = YOLO.loss(labels, pred)
 
         gradients = tape.gradient(loss_val, YOLO.model.trainable_variables)
         accum_gradient = [(acum_grad+grad) for acum_grad,grad in zip(accum_gradient,gradients)]
@@ -55,6 +65,9 @@ def train(args,hyp):
         if global_step==args.accum_steps:
             accum_gradient = [this_grad/args.accum_steps for this_grad in accum_gradient]
             YOLO.model.optimizer.apply_gradients(zip(accum_gradient, YOLO.model.trainable_variables))
+            if args.summary and args.summary_variable:
+                for var in YOLO.model.trainable_variables():
+                    tf.summary.histogram(var.op_name,var)
 
         # learning rate schedule
         global_step.assign_add(1)
@@ -71,23 +84,27 @@ def train(args,hyp):
     def test_step(images, labels,YOLO):
         pred = YOLO.model(images)
         loss_val = YOLO.loss(labels, pred)
+        if args.summary:
+            with writer.as_default():
+                tf.summary.scalar("val_loss", loss_val, step=global_step)
         return loss_val
 
     train_vars = YOLO.model.trainable_variables
     accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
     start_time = time.time()
     for epoch in range(args.warmup_epochs+args.epochs):
-        if (global_step-1) % args.accum_steps==0:
+        if (global_step.numpy()-1) % args.accum_steps==0:
             train_vars = YOLO.model.trainable_variables
             accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
 
         for images, labels in train_set:
             loss_val = train_step(images, labels,YOLO,accum_gradient)
+
         time_sofar = (time.time() - start_time) / 3600
         training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
 
-        if global_step%10==0:
-            print("=> Epoch:%4d | Train STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (epoch,global_step, loss_val,time_sofar,training_time_left))
+
+        print("=> Epoch:%4d | Train STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (epoch,global_step.numpy(), loss_val,time_sofar,training_time_left))
 
         for val_images, val_labels in val_set:
             loss_val = test_step(val_images, val_labels,YOLO)
@@ -95,16 +112,16 @@ def train(args,hyp):
         time_sofar = (time.time() - start_time) / 3600
         training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
 
-        if global_step % 10 == 0:
-            print("=> Epoch:%4d | VAL STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (
-        epoch, global_step, loss_val, time_sofar, training_time_left))
-            YOLO.model.save_weights(args.weight_save_path + '/{}'.format(epoch))
+        print("=> Epoch:%4d | VAL STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (
+        epoch, global_step.numpy(), loss_val, time_sofar, training_time_left))
+        YOLO.model.save_weights(args.weight_save_path + '/{}'.format(epoch))
 
     YOLO.model.save_weights(args.weight_save_path+'/final')
 
 
 if __name__== '__main__':
     import argparse
+
 
     parser = argparse.ArgumentParser(description='Darknet53 implementation.')
     parser.add_argument('--batch_size', type=int, help = 'size of batch', default=2)
@@ -119,6 +136,9 @@ if __name__== '__main__':
     parser.add_argument('--epochs', type=int,default=300 )
     parser.add_argument('--warmup_epochs', type=int, default=2)
     parser.add_argument('--soft',type=float,default=0.0)
+    parser.add_argument('--log_path', type=str, default='./log')
+    parser.add_argument('--summary', action='store_false')
+    parser.add_argument('--summary_variable', action='store_false')
     parser.add_argument('--weight_path',type=str,default='')
     parser.add_argument('--weight_save_path', type=str, default='./weight')
     parser.add_argument('--mode',

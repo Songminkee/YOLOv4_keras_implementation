@@ -78,7 +78,7 @@ class YOLOv4(object):
 
         return pred
 
-    def loss(self,box_label,out):
+    def loss(self,box_label,out,step=None,writer=None):
         bce = tf.keras.losses.BinaryCrossentropy(False, reduction=tf.keras.losses.Reduction.NONE)
         cp,cn = smoothing_value(self.num_classes,self.soft)
         iou_loss, object_loss, class_loss = 0, 0, 0
@@ -111,7 +111,20 @@ class YOLOv4(object):
             object_loss += l_obj
             class_loss += l_cls
 
+            if writer != None:
+                with writer.as_default():
+                    tf.summary.scalar("l_iou_{}".format(i), l_iou, step=step)
+                    tf.summary.scalar("l_obj_{}".format(i), l_obj, step=step)
+                    tf.summary.scalar("l_cls_{}".format(i), l_cls, step=step)
+
         loss = iou_loss*self.hyp['giou'] + object_loss * self.hyp['obj'] + class_loss * self.hyp['cls']
+        if writer != None:
+            with writer.as_default():
+                tf.summary.scalar("iou_loss", iou_loss, step=step)
+                tf.summary.scalar("object_loss", object_loss, step=step)
+                tf.summary.scalar("class_loss", class_loss, step=step)
+                tf.summary.scalar("loss",class_loss,step=step)
+
         return loss
 
 if __name__== '__main__':
