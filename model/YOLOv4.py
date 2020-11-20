@@ -47,11 +47,19 @@ class YOLOv4(object):
         x = convset(x,512)
 
         box1 = conv2d(route2,256,3,activation='leaky')
-        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False)(box1)
+        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False,
+                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                    kernel_initializer=tf.random_normal_initializer(stddev=0.01))(box1)
         box2 = conv2d(route3,512,3,activation='leaky')
-        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False)(box2)
+        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False,
+                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01)
+                                      )(box2)
         box3 = conv2d(x,1024,3,activation='leaky')
-        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False)(box3)
+        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False,
+                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01)
+                                      )(box3)
 
         return [box1,box2,box3]
 
@@ -103,9 +111,9 @@ class YOLOv4(object):
             l_cls = tf.expand_dims(bce(c_label,cls),-1) # [b,max_label,3,1]
 
             mask_num = tf.reduce_sum(tf.cast(mask,tf.float32))
-            l_iou = tf.reduce_sum(tf.where(mask,1-iou,0))/mask_num
-            l_obj = tf.reduce_sum(tf.where(mask,l_obj,0))/mask_num
-            l_cls = tf.reduce_sum(tf.where(mask,l_cls,0))/mask_num
+            l_iou = tf.reduce_sum(tf.where(mask,1-iou,0))/(mask_num+1e-16)
+            l_obj = tf.reduce_sum(tf.where(mask,l_obj,0))/(mask_num+1e-16)
+            l_cls = tf.reduce_sum(tf.where(mask,l_cls,0))/(mask_num+1e-16)
 
             iou_loss += l_iou
             object_loss += l_obj

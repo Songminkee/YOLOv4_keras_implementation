@@ -54,6 +54,9 @@ def train(args,hyp):
                 loss_val = YOLO.loss(labels, pred,step = global_step,writer=writer)
                 with writer.as_default():
                     tf.summary.scalar("learning rate", YOLO.model.optimizer.lr, step=global_step)
+                    if args.summary_variable:
+                        for var in YOLO.model.trainable_variables:
+                            tf.summary.histogram(var.name, var, step=global_step)
             else:
                 loss_val = YOLO.loss(labels, pred)
 
@@ -62,13 +65,9 @@ def train(args,hyp):
 
         YOLO.model.optimizer.apply_gradients(zip(gradients, YOLO.model.trainable_variables))
 
-        if global_step % args.accum_steps == 0:
+        if global_step % args.accum_steps == 0 or global_step % steps_per_epoch == 0:
             accum_gradient = [this_grad/args.accum_steps for this_grad in accum_gradient]
             YOLO.model.optimizer.apply_gradients(zip(accum_gradient, YOLO.model.trainable_variables))
-            if args.summary and args.summary_variable:
-                with writer.as_default():
-                    for var in YOLO.model.trainable_variables:
-                        tf.summary.histogram(var.name, var, step=global_step)
 
         # learning rate schedule
         global_step.assign_add(1)

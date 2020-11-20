@@ -10,7 +10,9 @@ def upsample(x):
     return tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
 
 def conv2d(x,filter,kernel,stride=1,name=None,activation='mish'):
-    x = tf.keras.layers.Conv2D(filter,kernel,stride,padding='same',use_bias=False)(x)
+    x = tf.keras.layers.Conv2D(filter,kernel,stride,padding='same',use_bias=False,
+                               kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                               kernel_initializer=tf.random_normal_initializer(stddev=0.01))(x)
     x = tf.keras.layers.BatchNormalization()(x)
     if activation=='mish':
         return mish(x,name)
