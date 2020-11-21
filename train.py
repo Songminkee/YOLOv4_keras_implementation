@@ -19,7 +19,7 @@ def train(args,hyp):
 
     train_set = loader.DataLoader(args, hyp,'train')
     val_set = loader.DataLoader(args, hyp, 'val')
-
+    accum_steps = max(round(64 / args.batch_size), 1)
     steps_per_epoch = int(np.ceil(len(train_set) / args.batch_size))
     global_step = tf.Variable(1, trainable=False, dtype=tf.int64)
     warmup_steps = args.warmup_epochs * steps_per_epoch
@@ -71,8 +71,8 @@ def train(args,hyp):
                     tf.summary.histogram(grad.name, grad, step=global_step)
         YOLO.model.optimizer.apply_gradients(zip(gradients, YOLO.model.trainable_variables))
 
-        if global_step % args.accum_steps == 0 or global_step % steps_per_epoch == 0:
-            accum_gradient = [this_grad/args.accum_steps for this_grad in accum_gradient]
+        if global_step % accum_steps == 0 or global_step % steps_per_epoch == 0:
+            accum_gradient = [this_grad for this_grad in accum_gradient]
             YOLO.model.optimizer.apply_gradients(zip(accum_gradient, YOLO.model.trainable_variables))
 
         # learning rate schedule
@@ -102,16 +102,16 @@ def train(args,hyp):
     accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
     start_time = time.time()
     for epoch in range(args.warmup_epochs+args.epochs):
-        if (global_step.numpy()-1) % args.accum_steps==0:
+        if (global_step.numpy()-1) % accum_steps==0:
             train_vars = YOLO.model.trainable_variables
             accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
 
         # train step
         for images, labels in train_set:
-            if global_step.numpy()<= burn*2:
-                YOLO.gr = np.interp(global_step.numpy(), [0, burn * 2], [0.0, 1.0])
+            if global_step.numpy() <= warmup_steps:
+                YOLO.gr = global_step.numy() / warmup_steps
             loss_val = train_step(images, labels,YOLO,accum_gradient)
-            if global_step.numpy()%500==0:
+            if global_step.numpy() % 500==0:
                 YOLO.model.save_weights(args.weight_save_path + '/step_{}'.format(global_step.numpy()))
 
         time_sofar = (time.time() - start_time) / 3600
@@ -139,7 +139,6 @@ if __name__== '__main__':
 
     parser = argparse.ArgumentParser(description='Darknet53 implementation.')
     parser.add_argument('--batch_size', type=int, help = 'size of batch', default=2)
-    parser.add_argument('--accum_steps', type=int, default=8)
     parser.add_argument('--img_size',              type=int,   help='input height', default=512)
     parser.add_argument('--data_root',              type=str,   help='', default='./data')
     parser.add_argument('--class_file',              type=str,   help='', default='coco.names')
