@@ -17,8 +17,10 @@ class YOLOv4(object):
             self.sigmoid_scale = sigmoid_scale
         else:
             self.sigmoid_scale = default_sigmoid_scale()
-        self.gr = 1.0
+
+        self.gr = 0.02
         self.hyp = hyp
+        self.batch_size = args.batch_size
         self.soft = args.soft
         self.anchors = make_anchor(self.stride,self.anchor)
         self.num_classes = args.num_classes
@@ -91,7 +93,7 @@ class YOLOv4(object):
         cp,cn = smoothing_value(self.num_classes,self.soft)
         iou_loss, object_loss, class_loss = 0, 0, 0
         for i in range(3):
-            scaler = label_scaler(out[i])
+            scaler = tf.stop_gradient(label_scaler(out[i]))
             label = box_label*scaler
             mask,idx,label = build_target(self.anchors[i],label,self.hyp)
 
@@ -101,10 +103,10 @@ class YOLOv4(object):
             conf,xywh,cls = tf.split(pred,[1,4,self.num_classes],-1)
 
             # get giou or ciou or diou
-            iou = get_iou_loss(xywh,box) # [b,max_label,3,1]
+            iou = tf.clip_by_value(get_iou_loss(xywh,box),0.0,1.0) # [b,max_label,3,1]
 
             # get obj(confidence) loss by iou
-            l_obj = tf.expand_dims(bce((1.0-self.gr) + self.gr*iou,conf),-1) # [b,max_label,3,1]
+            l_obj = tf.expand_dims(bce((1.0-self.gr) + self.gr*iou, conf),-1) # [b,max_label,3,1]
 
             # get class_loss
             c_label = tf.one_hot(tf.cast(tf.squeeze(c_label),tf.int32), self.num_classes, on_value=cp, off_value=cn)
@@ -133,14 +135,14 @@ class YOLOv4(object):
                 tf.summary.scalar("class_loss", class_loss, step=step)
                 tf.summary.scalar("loss",class_loss,step=step)
 
-        return loss
+        return loss *  self.batch_size / 64
 
 if __name__== '__main__':
     import argparse
 
     hyp = {'giou': 3.54,  # giou loss gain
            'cls': 37.4,  # cls loss gain
-           'obj': 64.3,  # obj loss gain (*=img_size/320 if img_size != 320)
+           'obj': 102.88,  # obj loss gain (=64.3*img_size/320 if img_size != 320)
            'iou_t': 0.213,  # iou training threshold
            'lr0': 0.01,  # initial learning rate (SGD=5E-3, Adam=5E-4)
            'lrf': 0.0005,  # final learning rate (with cos scheduler)
@@ -161,5 +163,5 @@ if __name__== '__main__':
     parser.add_argument('--img_size',              type=int,   help='input height', default=512)
     parser.add_argument('--num_classes', type=int, help='number of class', default=80)
     args = parser.parse_args()
-    YOLO = YOLOv4(args)
+    YOLO = YOLOv4(args,hyp)
     YOLO.model.summary()

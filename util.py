@@ -9,11 +9,14 @@ def mish(x,name):
 def upsample(x):
     return tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
 
-def conv2d(x,filter,kernel,stride=1,name=None,activation='mish'):
+def conv2d(x,filter,kernel,stride=1,name=None,activation='mish',gamma_zero=False):
     x = tf.keras.layers.Conv2D(filter,kernel,stride,padding='same',use_bias=False,
-                               kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                kernel_initializer=tf.random_normal_initializer(stddev=0.01))(x)
-    x = tf.keras.layers.BatchNormalization()(x)
+    if gamma_zero:
+        x = tf.keras.layers.BatchNormalization(momentum=0.03, epsilon=1e-4,gamma_initializer='zeros')(x)
+    else:
+        x = tf.keras.layers.BatchNormalization( momentum=0.03, epsilon=1e-4)(x)
+
     if activation=='mish':
         return mish(x,name)
     elif activation=='leaky':
@@ -59,7 +62,7 @@ def wh_iou(anchor, label):
     # wh1 = wh1[:, None]  # [N,1,2]
     # wh2 = wh2[None]  # [1,M,2]
     b,max_label,_=label.shape # [batch,max_label,2]
-    #print("origin_label",label)
+
     anchor = tf.reshape(tf.cast(anchor,tf.float32),[1,1,3,2])
     anchor = tf.tile(anchor,[b,max_label,1,1]) # [batch,3,max_label,2]
     label = tf.tile(tf.expand_dims(label, 2),[1,1,3,1]) # [batch,3,max_label,2]
@@ -69,10 +72,8 @@ def wh_iou(anchor, label):
 
     min_w = tf.reduce_min(tf.concat([anchor_w,label_w],-1),keepdims=True,axis=-1)
     min_h = tf.reduce_min(tf.concat([anchor_h,label_h],-1),keepdims=True,axis=-1)
-    inter = min_w*min_h
-    # print("inter",inter)
-    # print("label",label_h*label_w)
-    # print("an",anchor_h * anchor_w)
+    inter = min_w * min_h
+
     return inter / (label_w*label_h + anchor_h*anchor_w - inter)  # iou = inter / (area1 + area2 - inter)
 
 def label_scaler(out):
@@ -86,19 +87,19 @@ def get_idx(label):
 
 def build_target(anchor,label,hyp):
     iou = wh_iou(anchor, label[..., 3:])  # [b,max_label,3,1] 각 anchor 별 label과 iou
-    mask = iou>hyp['iou_t']
+    mask = iou > hyp['iou_t']
     idx = get_idx(label)
     label = tf.tile(tf.expand_dims(label,2),[1,1,3,1])
-    return mask,idx,label
+    return tf.stop_gradient(mask),tf.stop_gradient(idx),tf.stop_gradient(label)
 
 def get_iou_loss(pred,label,method='GIoU'):
     px, py, pw, ph = tf.split(pred, [1, 1, 1, 1], -1)
     lx, ly, lw, lh = tf.split(label, [1, 1, 1, 1], -1)
 
-    p_x1, p_x2 = px - pw / 2, px + pw / 2
-    p_y1, p_y2 = py - ph / 2, py + ph / 2
-    l_x1, l_x2 = lx - lw / 2, lx + lw / 2
-    l_y1, l_y2 = lw - lh / 2, lw + lh / 2
+    p_x1, p_x2 = px - pw / 2.0, px + pw / 2.0
+    p_y1, p_y2 = py - ph / 2.0, py + ph / 2.0
+    l_x1, l_x2 = lx - lw / 2.0, lx + lw / 2.0
+    l_y1, l_y2 = lw - lh / 2.0, lw + lh / 2.0
 
     con_x1 = tf.concat([p_x1, l_x1], -1)
     con_x2 = tf.concat([p_x2, l_x2], -1)
@@ -108,7 +109,7 @@ def get_iou_loss(pred,label,method='GIoU'):
     inter = tf.expand_dims((tf.reduce_min(con_x2,-1) - tf.reduce_min(con_x1,-1)) * \
             (tf.reduce_min(con_y2, -1) - tf.reduce_min(con_y1, -1)),-1)
 
-    union = (pw*ph + 1e-16) + lw*lh - inter
+    union = (pw * ph + 1e-16) + lw*lh - inter
     iou = inter/union
 
     cw = tf.reduce_max(con_x2,-1,keepdims=True) - tf.reduce_min(con_x1,-1,keepdims=True)
@@ -131,7 +132,3 @@ def get_iou_loss(pred,label,method='GIoU'):
 
 def smoothing_value(classes,eps=0.0):
     return (1.0-eps),eps/classes
-
-# print(load_class_name('./data','coco.names'))
-#
-# print(load_coco_image_label_files('./data','val'))

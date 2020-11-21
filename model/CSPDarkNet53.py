@@ -5,9 +5,9 @@ import argparse
 def resblock(input,filter,i,j):
     x = conv2d(input,filter//2,1,name='block_{}_{}_conv1'.format(i,j))
     if i:
-        x = conv2d(x,filter//2,3,name='block_{}_{}_conv3'.format(i,j))
+        x = conv2d(x,filter//2,3,name='block_{}_{}_conv3'.format(i,j),gamma_zero=True)
     else:
-        x = conv2d(x,filter,3,name='block_{}_{}_conv3'.format(i,j))
+        x = conv2d(x,filter,3,name='block_{}_{}_conv3'.format(i,j),gamma_zero=True)
 
     return tf.keras.layers.Add()([input,x])
 
@@ -76,8 +76,6 @@ class CSPDarkNet53(object):
         x = tf.keras.layers.GlobalAveragePooling2D()(x)
         x = tf.keras.layers.Dense(self.num_classes,activation='softmax')(x)
         return x
-
-
 
 
 if __name__== '__main__':
