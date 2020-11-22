@@ -31,7 +31,7 @@ def train(args,hyp):
     if args.train_by_steps:
         print('warmup by steps : {}'.format(args.warmup_by_steps))
         if args.warmup_by_steps:
-            warmup_steps = args.warmup_steps
+            warmup_steps = int(np.ceil(args.warmup_steps * 64 /args.batch_size))
         else:
             warmup_steps = args.warmup_epochs * steps_per_epoch
             print('warmup epochs : {}'.format(args.warmup_epochs))
@@ -39,11 +39,11 @@ def train(args,hyp):
             warmup_steps = 1
         print('warmup steps : {}'.format(warmup_steps))
         print('train by steps : {}'.format(args.train_by_steps))
-        total_steps = args.train_steps
+        total_steps = int(np.ceil(args.train_steps * 64 /args.batch_size))+warmup_steps
     else:
         print('warmup by steps : {}'.format(args.warmup_by_steps))
         if args.warmup_by_steps:
-            warmup_steps = args.warmup_steps
+            warmup_steps = int(np.ceil(args.warmup_steps * 64 /args.batch_size))
         else:
             warmup_steps = args.warmup_epochs * steps_per_epoch
             print('warmup epochs : {}'.format(args.warmup_epochs))
@@ -52,7 +52,7 @@ def train(args,hyp):
         print('warmup steps : {}'.format(warmup_steps))
         print('train by steps : {}'.format(args.train_by_steps))
         print('train epochs : {}'.format(args.epochs))
-        total_steps = (args.warmup_epochs+args.epochs) * steps_per_epoch
+        total_steps = args.epochs * steps_per_epoch + warmup_steps
     print('total_steps : {}'.format(total_steps))
 
     train_set = tf.data.Dataset.from_generator(train_set,(tf.float32,tf.float32))
