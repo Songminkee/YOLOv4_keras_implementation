@@ -2,6 +2,7 @@ import tensorflow as tf
 import glob
 import numpy as np
 import math
+import os
 
 def mish(x,name):
     return x * tf.nn.tanh( tf.nn.softplus(x),name=name)
@@ -41,8 +42,7 @@ def load_class_name(data_root_path,classes_file):
 def load_coco_image_label_files(data_root_path,mode):
     image_txt_path = data_root_path+'/dataset/coco_{}2017.txt'.format(mode)
     images_path = [l.strip('\n') for l in open(image_txt_path,'r')]
-    labels_path = [data_root_path+'/dataset/COCO/labels/{}2017/'.format(mode)+im_path.strip('jpg').split('/')[-1]+'txt' for im_path in images_path]
-
+    labels_path = ['/'+os.path.join(*im_path.split('/')[1:-3])+'/labels/{}2017/'.format(mode)+im_path.strip('jpg').split('/')[-1]+'txt' for im_path in images_path]
     return images_path,labels_path
 
 def make_anchor(stride,anchor):
