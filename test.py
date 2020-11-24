@@ -9,7 +9,6 @@ from dataloader import loader
 import numpy as np
 import time
 
-
 def test(args,hyp):
     physical_devices = tf.config.experimental.list_physical_devices('GPU')
     if len(physical_devices) > 0:

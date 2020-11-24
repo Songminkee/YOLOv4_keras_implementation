@@ -4,6 +4,8 @@ COCO/
 checkpoints/
 weight/
 log/
+dark_weight/
 coco_val2017.txt
 coco_train2017.txt
 coco_test2017.txt
+.vscode/

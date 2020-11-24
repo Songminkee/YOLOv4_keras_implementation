@@ -45,16 +45,24 @@ def load_coco_image_label_files(data_root_path,mode):
     labels_path = ['/'+os.path.join(*im_path.split('/')[1:-3])+'/labels/{}2017/'.format(mode)+im_path.strip('jpg').split('/')[-1]+'txt' for im_path in images_path]
     return images_path,labels_path
 
-def make_anchor(stride,anchor):
+def make_anchor(stride,anchor,is_tiny=False):
+    if is_tiny:
+        return np.reshape(anchor,(-1,3,2))/np.reshape(stride,(2,1,1))
     return np.reshape(anchor,(-1,3,2))/np.reshape(stride,(3,1,1))
 
-def default_stride():
+def default_stride(is_tiny=False):
+    if is_tiny:
+        return np.array([16,32])
     return np.array([8,16,32])
 
-def default_anchor():
+def default_anchor(is_tiny=False):
+    if is_tiny:
+        return np.array([23,27, 37,58, 81,82, 81,82, 135,169, 344,319])
     return np.array([12, 16, 19, 36, 40, 28, 36, 75, 76, 55, 72, 146, 142, 110, 192, 243, 459, 401])
 
-def default_sigmoid_scale():
+def default_sigmoid_scale(is_tiny=False):
+    if is_tiny:
+        return np.array([1.05,1.05])
     return np.array([1.2, 1.1, 1.05])
 
 def wh_iou(anchor, label):

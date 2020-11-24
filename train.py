@@ -9,8 +9,9 @@ from model import YOLOv4
 from dataloader import loader
 import numpy as np
 import time
+import gc
 
-print(tf.config.experimental.list_physical_devices('GPU'))
+#print(tf.config.experimental.list_physical_devices('GPU'))
 
 def train(args,hyp):
     physical_devices = tf.config.experimental.list_physical_devices('GPU')
@@ -61,8 +62,11 @@ def train(args,hyp):
     val_set = tf.data.Dataset.from_generator(val_set,(tf.float32,tf.float32))
     val_set=val_set.batch(args.batch_size).repeat(1)
 
-    YOLO = YOLOv4.YOLOv4(args, hyp)
-
+    if args.is_tiny:
+        YOLO = YOLOv4.YOLOv4_tiny(args,hyp)
+    else:
+        YOLO = YOLOv4.YOLOv4(args, hyp)
+    
     # load pretrained model
     if args.weight_path!='':
         print('load_model from {}'.format(args.weight_path))
@@ -76,6 +80,8 @@ def train(args,hyp):
 
     if args.summary:
         print('Summary will be stored in {} \n You can check the learning contents with the command "tensorboard --logdir {}"'.format(args.log_path,args.log_path))
+        if not os.path.exists(args.log_path):
+            os.makedirs(args.log_path)
         writer = tf.summary.create_file_writer(args.log_path)
     print('-' * 10)
 
@@ -88,9 +94,9 @@ def train(args,hyp):
                 loss_val = YOLO.loss(labels, pred,step = global_step,writer=writer)
                 with writer.as_default():
                     tf.summary.scalar("learning rate", YOLO.model.optimizer.lr, step=global_step)
-                    if args.summary_variable:
-                        for var in YOLO.model.trainable_variables[-50:]:
-                            tf.summary.histogram(var.name, var, step=global_step)
+                    # if args.summary_variable:
+                    #     for var in YOLO.model.trainable_variables[-50:]:
+                    #         tf.summary.histogram(var.name, var, step=global_step)
             else:
                 loss_val = YOLO.loss(labels, pred)
 
@@ -133,8 +139,7 @@ def train(args,hyp):
         return loss_val
 
     # accum gradient init
-    train_vars = YOLO.model.trainable_variables
-    accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
+    accum_gradient = [tf.zeros_like(this_var) for this_var in YOLO.model.trainable_variables]
     start_time = time.time()
 
     # total_epochs cal
@@ -148,8 +153,8 @@ def train(args,hyp):
     for epoch in range(total_epochs):
         # accum gradient init
         if (global_step.numpy()-1) % accum_steps==0 or (not args.train_by_steps and not args.warmup_by_steps and (global_step.numpy()-1) % steps_per_epoch == 0):
-            train_vars = YOLO.model.trainable_variables
-            accum_gradient = [tf.zeros_like(this_var) for this_var in train_vars]
+            accum_gradient = [tf.zeros_like(this_var) for this_var in YOLO.model.trainable_variables]
+            gc.collect()
 
         # train step
         for images, labels in train_set:
@@ -189,9 +194,9 @@ def train(args,hyp):
 if __name__== '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='Darknet53 implementation.')
-    parser.add_argument('--batch_size', type=int, help = 'size of batch', default=8)
-    parser.add_argument('--img_size',              type=int,   help='input height', default=512)
+    parser = argparse.ArgumentParser(description='YOLOv4 implementation.')
+    parser.add_argument('--batch_size', type=int, help = 'size of batch', default=64)
+    parser.add_argument('--img_size',              type=int,   help='input height', default=416)
     parser.add_argument('--data_root',              type=str,   help='', default='./data')
     parser.add_argument('--class_file',              type=str,   help='', default='coco.names')
     parser.add_argument('--num_classes', type=int, help='', default=80)
@@ -205,8 +210,9 @@ if __name__== '__main__':
     parser.add_argument('--warmup_steps', type = int, default=1000)
     parser.add_argument('--warmup_epochs', type=int, default=2)
     parser.add_argument('--save_steps', type=int, default=1000)
+    parser.add_argument('--is_tiny', action='store_false')
     parser.add_argument('--soft',type=float,default=0.0)
-    parser.add_argument('--log_path', type=str, default='./log/burn')
+    parser.add_argument('--log_path', type=str, default='./log/tiny')
     parser.add_argument('--summary', action='store_false')
     parser.add_argument('--summary_variable', action='store_false')
     parser.add_argument('--weight_path',type=str,default='')
@@ -220,7 +226,7 @@ if __name__== '__main__':
     args = parser.parse_args()
     hyp = {'giou': 3.54,  # giou loss gain
            'cls': 37.4,  # cls loss gain
-           'obj': 102.88,  # obj loss gain (=64.3*img_size/320 if img_size != 320)
+           'obj': 83.59,  # obj loss gain (=64.3*img_size/320 if img_size != 320)
            'iou_t': 0.213,  # iou training threshold
            'lr0': 0.01,  # initial learning rate (SGD=5E-3, Adam=5E-4)
            'lrf': 0.0013,  # final learning rate (with cos scheduler)

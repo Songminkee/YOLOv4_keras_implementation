@@ -43,8 +43,7 @@ if __name__== '__main__':
 
     parser = argparse.ArgumentParser(description='CSPDarknet53 implementation.')
     parser.add_argument('--batch_size', type=int, help = 'size of batch', default=4)
-    parser.add_argument('--img_h',              type=int,   help='input height', default=256)
-    parser.add_argument('--img_w',               type=int,   help='input width', default=256)
+    parser.add_argument('--img_size',              type=int,   help='input height', default=256)
     parser.add_argument('--include_top', type=bool, help='include classifier? default is False',default=True)
     args = parser.parse_args()
     darknet = DarkNet53(args,1000)
