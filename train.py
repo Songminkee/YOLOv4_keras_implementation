@@ -203,12 +203,12 @@ if __name__== '__main__':
     parser.add_argument('--augment',              action='store_false',   help='')
     parser.add_argument('--mosaic', action='store_false', help='')
     parser.add_argument('--is_shuffle', action='store_false', help='')
-    parser.add_argument('--train_by_steps',action='store_false')
+    parser.add_argument('--train_by_steps',action='store_true')
     parser.add_argument('--train_steps', type=int, default=500500)
-    parser.add_argument('--epochs', type=int,default=34 )
-    parser.add_argument('--warmup_by_steps', action='store_false')
+    parser.add_argument('--epochs', type=int,default=300 )
+    parser.add_argument('--warmup_by_steps', action='store_true')
     parser.add_argument('--warmup_steps', type = int, default=1000)
-    parser.add_argument('--warmup_epochs', type=int, default=2)
+    parser.add_argument('--warmup_epochs', type=int, default=3)
     parser.add_argument('--save_steps', type=int, default=1000)
     parser.add_argument('--is_tiny', action='store_false')
     parser.add_argument('--soft',type=float,default=0.0)
@@ -224,9 +224,9 @@ if __name__== '__main__':
                         choices=['train', 'test'],
                         help='Mode [train, test]')
     args = parser.parse_args()
-    hyp = {'giou': 3.54,  # giou loss gain
-           'cls': 37.4,  # cls loss gain
-           'obj': 83.59,  # obj loss gain (=64.3*img_size/320 if img_size != 320)
+    hyp = {'giou': 0.05,#3.54,  # giou loss gain
+           'cls': 0.5,#37.4,  # cls loss gain
+           'obj': 1.0,#83.59,  # obj loss gain (=64.3*img_size/320 if img_size != 320)
            'iou_t': 0.213,  # iou training threshold
            'lr0': 0.01,  # initial learning rate (SGD=5E-3, Adam=5E-4)
            'lrf': 0.0013,  # final learning rate (with cos scheduler)
