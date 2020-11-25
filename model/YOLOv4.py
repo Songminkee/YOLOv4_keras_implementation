@@ -30,41 +30,40 @@ class YOLOv4(object):
         self.out = self.pred(self.box_feature)
         self.model = tf.keras.Model(inputs=self.backbone.input,outputs=self.out)
 
-    def head(self,backbone_out):
-        r3,r2,r1 = backbone_out
+    def head(self, backbone_out):
+        r3, r2, r1 = backbone_out
 
-        x = conv2d(r1,256,1,activation='leaky')
+        x = conv2d(r1, 256, 1, activation='leaky')
         x = upsample(x)
-        x = tf.concat([x,conv2d(r2,256,1,activation='leaky')],-1)
-        route1 = convset(x,256)
+        x = tf.concat([x, conv2d(r2, 256, 1, activation='leaky')], -1)
+        route1 = convset(x, 256)
 
-        x = conv2d(route1,128,1,activation='leaky')
+        x = conv2d(route1, 128, 1, activation='leaky')
         x = upsample(x)
-        x = tf.concat([x,conv2d(r3,128,1,activation='leaky')],-1)
-        route2 = convset(x,128)
-
-        x = tf.concat([route1,conv2d(route2,256,3,2,activation='leaky')],-1)
-        route3 = convset(x,256)
-
-        x = tf.concat([r1,conv2d(route3,512,3,2,activation='leaky')],-1)
-        x = convset(x,512)
-
-        box1 = conv2d(route2,256,3,activation='leaky')
-        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False,
+        x = tf.concat([x, conv2d(r3, 128, 1, activation='leaky')], -1)
+        route2 = convset(x, 128)
+        box1 = conv2d(route2, 256, 3, activation='leaky')
+        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                    kernel_initializer=tf.random_normal_initializer(stddev=0.01))(box1)
-        box2 = conv2d(route3,512,3,activation='leaky')
-        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False,
+                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01))(box1)
+
+        x = tf.concat([route1, conv2d(route2, 256, 3, 2, activation='leaky')], -1)
+        route3 = convset(x, 256)
+        box2 = conv2d(route3, 512, 3, activation='leaky')
+        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box2)
-        box3 = conv2d(x,1024,3,activation='leaky')
-        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False,
+
+        x = tf.concat([r1, conv2d(route3, 512, 3, 2, activation='leaky')], -1)
+        x = convset(x, 512)
+        box3 = conv2d(x, 1024, 3, activation='leaky')
+        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box3)
 
-        return [box1,box2,box3]
+        return [box1, box2, box3]
 
     def pred(self,boxes):
         pred = []
@@ -167,27 +166,27 @@ class YOLOv4_tiny(object):
         self.out = self.pred(self.box_feature)
         self.model = tf.keras.Model(inputs=self.backbone.input,outputs=self.out)
 
-    def head(self,backbone_out):
-        r1,r2 = backbone_out
+    def head(self, backbone_out):
+        r1, r2 = backbone_out
 
-        x = conv2d(r2,256,1,activation='leaky')
+        x = conv2d(r2, 256, 1, activation='leaky')
 
-        box2 = conv2d(x,512,3,activation='leaky')
+        box2 = conv2d(x, 512, 3, activation='leaky')
+        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
+                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01)
+                                      )(box2)
 
-        x = conv2d(x,128,1,activation='leaky')
+        x = conv2d(x, 128, 1, activation='leaky')
         x = upsample(x)
-        x = tf.concat([x,r1],-1)
-        box1 = conv2d(x,256,3,activation='leaky')
-        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False,
+        x = tf.concat([x, r1], -1)
+        box1 = conv2d(x, 256, 3, activation='leaky')
+        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box1)
 
-        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1, use_bias=False,
-                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01)
-                                      )(box2)
-        return [box1,box2]
+        return [box1, box2]
 
     def pred(self,boxes):
         pred = []
