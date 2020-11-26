@@ -72,7 +72,7 @@ class YOLOv4(object):
 
             box = tf.reshape(box, (-1, box_shape[1], box_shape[2], 3, self.num_classes + 5))
 
-            xy, wh, conf, cls = tf.split(box, ([1, 2, 2, self.num_classes]), -1)
+            xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
             shape = tf.shape(xy)
 
             xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1]))  # w,h
@@ -100,7 +100,7 @@ class YOLOv4(object):
             c_label, box = tf.split(label,[1,4],-1)
 
             pred = tf.gather_nd(out[i],idx)
-            conf,xywh,cls = tf.split(pred,[1,4,self.num_classes],-1)
+            xywh,conf,cls = tf.split(pred,[4,1,self.num_classes],-1)
 
             # get giou or ciou or diou
             iou = tf.clip_by_value(get_iou_loss(xywh,box),0.0,1.0) # [b,max_label,3,1]
@@ -195,7 +195,7 @@ class YOLOv4_tiny(object):
 
             box = tf.reshape(box,(-1,box_shape[1],box_shape[2],3,self.num_classes+5))
 
-            xy,wh,conf,cls = tf.split(box,([1,2,2,self.num_classes]),-1)
+            xy,wh,conf,cls = tf.split(box,([2,2,1,self.num_classes]),-1)
             shape = tf.shape(xy)
 
             xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1])) # w,h
@@ -223,7 +223,7 @@ class YOLOv4_tiny(object):
             c_label, box = tf.split(label,[1,4],-1)
 
             pred = tf.gather_nd(out[i],idx)
-            conf,xywh,cls = tf.split(pred,[1,4,self.num_classes],-1)
+            conf,xywh,cls = tf.split(pred,[4,1,self.num_classes],-1)
 
             # get giou or ciou or diou
             iou = tf.clip_by_value(get_iou_loss(xywh,box),0.0,1.0) # [b,max_label,3,1]
