@@ -223,7 +223,7 @@ class YOLOv4_tiny(object):
             c_label, box = tf.split(label,[1,4],-1)
 
             pred = tf.gather_nd(out[i],idx)
-            conf,xywh,cls = tf.split(pred,[4,1,self.num_classes],-1)
+            xywh,conf,cls = tf.split(pred,[4,1,self.num_classes],-1)
 
             # get giou or ciou or diou
             iou = tf.clip_by_value(get_iou_loss(xywh,box),0.0,1.0) # [b,max_label,3,1]
