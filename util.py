@@ -11,8 +11,14 @@ def upsample(x):
     return tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
 
 def conv2d(x,filter,kernel,stride=1,name=None,activation='mish',gamma_zero=False):
-    x = tf.keras.layers.Conv2D(filter,kernel,stride,padding='same',use_bias=False,
+    if stride==1:
+        x = tf.keras.layers.Conv2D(filter,kernel,stride,padding='same',use_bias=False,
                                kernel_initializer=tf.random_normal_initializer(stddev=0.01))(x)
+    else:
+        x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
+        x = tf.keras.layers.Conv2D(filter, kernel, stride, padding='valid', use_bias=False,
+                                   kernel_initializer=tf.random_normal_initializer(stddev=0.01))(x)
+
     if gamma_zero:
         x = tf.keras.layers.BatchNormalization(momentum=0.03, epsilon=1e-4,gamma_initializer='zeros')(x)
     else:
@@ -21,7 +27,7 @@ def conv2d(x,filter,kernel,stride=1,name=None,activation='mish',gamma_zero=False
     if activation=='mish':
         return mish(x,name)
     elif activation=='leaky':
-        return tf.keras.layers.LeakyReLU(name=name)(x)
+        return tf.nn.leaky_relu(x, alpha=0.1)#tf.keras.layers.LeakyReLU(name=name,alpha=0.1)(x)
 
 def convset(x, filter):
     x = conv2d(x, filter, 1,activation='leaky')
@@ -192,3 +198,53 @@ def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
          35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
          64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
     return x
+
+def merge_info(box,classes,stride):
+    batch = tf.shape(box)[0]
+    xy,wh, conf, cls = tf.split(box, [2,2,1, classes], -1)
+    wh *= stride
+    cls *= conf
+    xywh = tf.concat([xy*stride,wh],-1)
+    xywh = tf.reshape(xywh,[batch,-1,4])
+    cls = tf.reshape(cls,[batch,-1,classes])
+    return tf.concat([xywh, cls],-1)
+
+def inference(yolo,input,args):
+    boxes = yolo.model(input,training=False)
+    boxes = tf.concat([merge_info(box, yolo.num_classes, yolo.stride[i]) for i, box in enumerate(boxes)], 1)
+
+    # Eliminate low confidence
+    xywh, cls = tf.split(boxes, [4, yolo.num_classes], -1)
+
+    scores_max = tf.math.reduce_max(cls, axis=-1)
+    mask = scores_max >= args.confidence_threshold
+    class_boxes = tf.boolean_mask(xywh, mask)
+    pred_conf = tf.boolean_mask(cls, mask)
+    class_boxes = tf.reshape(class_boxes, [tf.shape(cls)[0], -1, tf.shape(class_boxes)[-1]])
+    cls_conf = tf.reshape(pred_conf, [tf.shape(cls)[0], -1, tf.shape(pred_conf)[-1]])
+
+    # Convert to tf_nms format
+    box_xy, box_wh = tf.split(class_boxes, (2, 2), axis=-1)
+    box_yx = box_xy[..., ::-1]
+    box_hw = box_wh[..., ::-1]
+
+    box_mins = (box_yx - (box_hw / 2.)) / args.img_size
+    box_maxes = (box_yx + (box_hw / 2.)) / args.img_size
+    box = tf.concat([
+        box_mins[..., 0:1],  # y_min
+        box_mins[..., 1:2],  # x_min
+        box_maxes[..., 0:1],  # y_max
+        box_maxes[..., 1:2]  # x_max
+    ], axis=-1)
+
+    # NMS
+    boxes, scores, classes, valid_detections = tf.image.combined_non_max_suppression(
+        boxes=tf.reshape(box, (args.batch_size, -1, 1, 4)),
+        scores=tf.reshape(
+            cls_conf, (args.batch_size, -1, tf.shape(cls_conf)[-1])),
+        max_output_size_per_class=50,
+        max_total_size=50,
+        iou_threshold=0.5,
+        score_threshold=0.25
+    )
+    return boxes, scores, classes, valid_detections

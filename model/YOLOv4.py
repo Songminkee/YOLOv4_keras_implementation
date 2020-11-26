@@ -35,19 +35,19 @@ class YOLOv4(object):
 
         x = conv2d(r1, 256, 1, activation='leaky')
         x = upsample(x)
-        x = tf.concat([x, conv2d(r2, 256, 1, activation='leaky')], -1)
+        x = tf.concat([conv2d(r2, 256, 1, activation='leaky'),x], -1)
         route1 = convset(x, 256)
 
         x = conv2d(route1, 128, 1, activation='leaky')
         x = upsample(x)
-        x = tf.concat([x, conv2d(r3, 128, 1, activation='leaky')], -1)
+        x = tf.concat([conv2d(r3, 128, 1, activation='leaky'),x], -1)
         route2 = convset(x, 128)
         box1 = conv2d(route2, 256, 3, activation='leaky')
         box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01))(box1)
 
-        x = tf.concat([route1, conv2d(route2, 256, 3, 2, activation='leaky')], -1)
+        x = tf.concat([conv2d(route2, 256, 3, 2, activation='leaky'),route1], -1)
         route3 = convset(x, 256)
         box2 = conv2d(route3, 512, 3, activation='leaky')
         box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
@@ -55,7 +55,7 @@ class YOLOv4(object):
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box2)
 
-        x = tf.concat([r1, conv2d(route3, 512, 3, 2, activation='leaky')], -1)
+        x = tf.concat([ conv2d(route3, 512, 3, 2, activation='leaky'),r1], -1)
         x = convset(x, 512)
         box3 = conv2d(x, 1024, 3, activation='leaky')
         box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
@@ -69,7 +69,6 @@ class YOLOv4(object):
         pred = []
         for i, box in enumerate(boxes):
             box_shape = box.shape
-
             box = tf.reshape(box, (-1, box_shape[1], box_shape[2], 3, self.num_classes + 5))
 
             xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
@@ -79,9 +78,8 @@ class YOLOv4(object):
             xy_grid = tf.expand_dims(tf.stack(xy_grid, -1), 2)
             xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [shape[0], 1, 1, 3, 1]), tf.float32)  # b,h,w,3,2
 
-            pred_xy = ((tf.sigmoid(xy) * self.sigmoid_scale[i]) + xy_grid)
-            pred_wh = tf.exp(wh) * self.anchor[i]
-
+            pred_xy = ((tf.sigmoid(xy) * self.sigmoid_scale[i])  + xy_grid)
+            pred_wh = tf.exp(wh) * self.anchors[i]
             pred_cls = tf.sigmoid(cls)
             pred_conf = tf.sigmoid(conf)
             pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
@@ -143,23 +141,23 @@ class YOLOv4_tiny(object):
         if stride:
             self.stride = stride
         else:
-            self.stride=default_stride(is_tiny=True)
+            self.stride=default_stride(is_tiny=args.is_tiny)
 
         if anchor:
             self.anchor = anchor
         else:
-            self.anchor = default_anchor(is_tiny=True)
+            self.anchor = default_anchor(is_tiny=args.is_tiny)
 
         if sigmoid_scale:
             self.sigmoid_scale = sigmoid_scale
         else:
-            self.sigmoid_scale = default_sigmoid_scale(is_tiny=True)
+            self.sigmoid_scale = default_sigmoid_scale(is_tiny=args.is_tiny)
 
         self.gr = 0.02
         self.hyp = hyp
         self.batch_size = args.batch_size
         self.soft = args.soft
-        self.anchors = make_anchor(self.stride,self.anchor,is_tiny=True)
+        self.anchors = make_anchor(self.stride,self.anchor,is_tiny=args.is_tiny)
         self.num_classes = args.num_classes
         self.backbone = CSPDarkNet53_tiny.CSPDarkNet53_tiny(args).model
         self.box_feature = self.head(self.backbone.output)
@@ -190,9 +188,9 @@ class YOLOv4_tiny(object):
 
     def pred(self,boxes):
         pred = []
+
         for i,box in enumerate(boxes):
             box_shape = box.shape
-
             box = tf.reshape(box,(-1,box_shape[1],box_shape[2],3,self.num_classes+5))
 
             xy,wh,conf,cls = tf.split(box,([2,2,1,self.num_classes]),-1)
@@ -203,7 +201,7 @@ class YOLOv4_tiny(object):
             xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [shape[0], 1, 1, 3, 1]),tf.float32) # b,h,w,3,2
 
             pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])+xy_grid)
-            pred_wh = tf.exp(wh)*self.anchor[i]
+            pred_wh = tf.exp(wh)*self.anchors[i]
 
             pred_cls = tf.sigmoid(cls)
             pred_conf = tf.sigmoid(conf)

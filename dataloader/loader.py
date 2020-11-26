@@ -236,7 +236,7 @@ class DataLoader(tf.keras.utils.Sequence):
             img, ratio, pad = self.letterbox(img, self.img_size, scaleup=(self.augment) and self.mode !='test')
 
             if self.mode == 'test':
-                return cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
+                return np.expand_dims(cv2.cvtColor(img,cv2.COLOR_BGR2RGB) / 255.0,0)
 
             #shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
             label = self.load_label(index)
@@ -261,7 +261,7 @@ class DataLoader(tf.keras.utils.Sequence):
         label_out[:label.shape[0]]=label
         if now_index==len(self)-1:
             self.on_epoch_end()
-        return img,label_out
+        return img/255.0,label_out
 
 hyp = {'giou': 3.54,  # giou loss gain
        'cls': 37.4,  # cls loss gain

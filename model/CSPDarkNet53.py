@@ -45,11 +45,11 @@ class CSPDarkNet53(object):
 
             if not i:
                 x = conv2d(x, self.filter[i], 1, name='block_{}_conv1_2'.format(i))
-                x = tf.concat([route,x],axis=-1,name='concat_{}'.format(i))
+                x = tf.concat([x,route],axis=-1,name='concat_{}'.format(i))
                 x = conv2d(x,self.filter[i],1,name='block_{}_out'.format(i))
             else:
                 x = conv2d(x, self.filter[i]//2, 1, name='block_{}_conv1_2'.format(i))
-                x = tf.concat([route, x], axis=-1, name='concat_{}'.format(i))
+                x = tf.concat([x,route], axis=-1, name='concat_{}'.format(i))
                 x = conv2d(x, self.filter[i], 1, name='block_{}_out'.format(i))
 
             if i==2 or i==3:
