@@ -65,26 +65,26 @@ class YOLOv4(object):
 
         return [box1, box2, box3]
 
-    def pred(self,boxes):
+    def pred(self, boxes):
         pred = []
-        for i,box in enumerate(boxes):
+        for i, box in enumerate(boxes):
             box_shape = box.shape
 
-            box = tf.reshape(box,(-1,box_shape[1],box_shape[2],3,self.num_classes+5))
+            box = tf.reshape(box, (-1, box_shape[1], box_shape[2], 3, self.num_classes + 5))
 
-            conf,xy,wh,cls = tf.split(box,([1,2,2,self.num_classes]),-1)
+            xy, wh, conf, cls = tf.split(box, ([1, 2, 2, self.num_classes]), -1)
             shape = tf.shape(xy)
 
-            xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1])) # w,h
-            xy_grid = tf.expand_dims(tf.stack(xy_grid,-1),2)
-            xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [shape[0], 1, 1, 3, 1]),tf.float32) # b,h,w,3,2
+            xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1]))  # w,h
+            xy_grid = tf.expand_dims(tf.stack(xy_grid, -1), 2)
+            xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [shape[0], 1, 1, 3, 1]), tf.float32)  # b,h,w,3,2
 
-            pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])+xy_grid)
-            pred_wh = tf.exp(wh)*self.anchor[i]
+            pred_xy = ((tf.sigmoid(xy) * self.sigmoid_scale[i]) + xy_grid)
+            pred_wh = tf.exp(wh) * self.anchor[i]
 
             pred_cls = tf.sigmoid(cls)
             pred_conf = tf.sigmoid(conf)
-            pred.append(tf.concat([pred_conf,pred_xy,pred_wh,pred_cls],-1))
+            pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
 
         return pred
 
@@ -195,7 +195,7 @@ class YOLOv4_tiny(object):
 
             box = tf.reshape(box,(-1,box_shape[1],box_shape[2],3,self.num_classes+5))
 
-            conf,xy,wh,cls = tf.split(box,([1,2,2,self.num_classes]),-1)
+            xy,wh,conf,cls = tf.split(box,([1,2,2,self.num_classes]),-1)
             shape = tf.shape(xy)
 
             xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1])) # w,h
@@ -207,7 +207,7 @@ class YOLOv4_tiny(object):
 
             pred_cls = tf.sigmoid(cls)
             pred_conf = tf.sigmoid(conf)
-            pred.append(tf.concat([pred_conf,pred_xy,pred_wh,pred_cls],-1))
+            pred.append(tf.concat([pred_xy,pred_wh,pred_conf,pred_cls],-1))
 
         return pred
 

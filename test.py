@@ -8,68 +8,51 @@ from model import YOLOv4
 from dataloader import loader
 import numpy as np
 import time
+from util import *
 
 def test(args,hyp):
     physical_devices = tf.config.experimental.list_physical_devices('GPU')
     if len(physical_devices) > 0:
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
-    val_set = loader.DataLoader(args, hyp, 'val')
-    # val_set = tf.data.Dataset.from_generator(val_set,(tf.float32,tf.float32))
-    # val_set=val_set.batch(args.batch_size).repeat(1)
+    val_set = loader.DataLoader(args, hyp, 'test')
 
-    YOLO = YOLOv4.YOLOv4(args, hyp)
+    if args.is_tiny:
+        YOLO = YOLOv4.YOLOv4_tiny(args,hyp)
+    else:
+        YOLO = YOLOv4.YOLOv4(args, hyp)
+
     if args.weight_path!='':
-        print('load_model from {}'.format(args.weight_path))
-        YOLO.model.load_weights(args.weight_path)
-
-
-
-    for var in YOLO.model.trainable_variables:
-        print(var)
-
-    # @tf.function
-    # def test(img,labels):
-    #     with tf.GradientTape() as tape:
-    #         out = YOLO.model(img)
-    #         print(out)
-    #         loss = YOLO.loss(labels,out)
-    #     print(loss)
-    #     #gradients = tape.gradient(loss, YOLO.model.trainable_variables)
+        if args.is_darknet_weight:
+            print('load darkent weight from {}'.format(args.weight_path))
+            load_darknet_weights(YOLO.model,args.weight_path,args.is_tiny)
+        else:
+            print('load_model from {}'.format(args.weight_path))
+            YOLO.model.load_weights(args.weight_path)
 
     for img, labels in val_set:
         out = YOLO.model(tf.expand_dims(img,0))
-        print(out)
-        loss = YOLO.loss(labels,out)
-        print(loss)
-        # test(img,labels)
-        # gradients = tape.gradient(loss, YOLO.model.trainable_variables)
-        # print(gradients)
+
+
         break
 
 if __name__== '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='Darknet53 implementation.')
-    parser.add_argument('--batch_size', type=int, help = 'size of batch', default=2)
-    parser.add_argument('--accum_steps', type=int, default=8)
+    parser = argparse.ArgumentParser(description='YOLOv4 Test')
+    parser.add_argument('--batch_size', type=int, help = 'size of batch', default=1)
     parser.add_argument('--img_size',              type=int,   help='input height', default=512)
     parser.add_argument('--data_root',              type=str,   help='', default='./data')
     parser.add_argument('--class_file',              type=str,   help='', default='coco.names')
     parser.add_argument('--num_classes', type=int, help='', default=80)
-    parser.add_argument('--augment',              action='store_false',   help='')
-    parser.add_argument('--mosaic', action='store_false', help='')
+    parser.add_argument('--augment',              action='store_true',   help='')
+    parser.add_argument('--mosaic', action='store_true', help='')
     parser.add_argument('--is_shuffle', action='store_false', help='')
-    parser.add_argument('--epochs', type=int,default=300 )
-    parser.add_argument('--warmup_epochs', type=int, default=2)
-    parser.add_argument('--soft',type=float,default=0.0)
-    parser.add_argument('--log_path', type=str, default='./log')
-    parser.add_argument('--summary', action='store_false')
-    parser.add_argument('--summary_variable', action='store_false')
     parser.add_argument('--weight_path',type=str,default='')
-    parser.add_argument('--weight_save_path', type=str, default='./weight')
+    parser.add_argument('--is_darknet_weight', action='store_true')
+    parser.add_argument('--is_tiny', action='store_true')
     parser.add_argument('--mode',
-                        default='train',
-                        const='train',
+                        default='test',
+                        const='test',
                         nargs='?',
                         choices=['train', 'test'],
                         help='Mode [train, test]')
