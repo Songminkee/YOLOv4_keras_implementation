@@ -234,9 +234,9 @@ def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
 def merge_info(box,classes,stride):
     batch = tf.shape(box)[0]
     xy,wh, conf, cls = tf.split(box, [2,2,1, classes], -1)
-    wh *= stride
     cls *= conf
-    xywh = tf.concat([xy*stride,wh],-1)
+    xywh = tf.concat([xy,wh],-1)*stride
+
     xywh = tf.reshape(xywh,[batch,-1,4])
     cls = tf.reshape(cls,[batch,-1,classes])
     return tf.concat([xywh, cls],-1)
@@ -250,6 +250,7 @@ def inference(yolo,input,args):
 
     scores_max = tf.math.reduce_max(cls, axis=-1)
     mask = scores_max >= args.confidence_threshold
+
     class_boxes = tf.boolean_mask(xywh, mask)
     pred_conf = tf.boolean_mask(cls, mask)
     class_boxes = tf.reshape(class_boxes, [tf.shape(cls)[0], -1, tf.shape(class_boxes)[-1]])
@@ -274,8 +275,8 @@ def inference(yolo,input,args):
         boxes=tf.reshape(box, (args.batch_size, -1, 1, 4)),
         scores=tf.reshape(
             cls_conf, (args.batch_size, -1, tf.shape(cls_conf)[-1])),
-        max_output_size_per_class=50,
-        max_total_size=50,
+        max_output_size_per_class=100,
+        max_total_size=100,
         iou_threshold=args.iou_threshold,
         score_threshold=args.score_threshold,
     )

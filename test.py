@@ -41,20 +41,24 @@ def test(args,hyp,test_set):
 
         positive=np.zeros((valid_detections[0].numpy()),dtype=np.bool)
         detected = []
+
         y_min, x_min, y_max, x_max = convert_to_origin_shape(boxes[0], pad, ratio, h0, w0, h, w, args.is_padding)
 
         n_box = tf.concat([x_min, y_min, x_max, y_max], -1)
         ious = get_iou(n_box, label[:, 1:], h0, w0)
 
         for i in range(valid_detections[0].numpy()):
-            json_list.append({'image_id' : id,
-                              'category_id' : yolo2coco[int(classes[0][i])],
-                              'bbox' : [float(round(b.numpy(),3)) for b in [x_min[i][0],y_min[i][0],x_max[i][0]-x_min[i][0],y_max[i][0]-y_min[i][0]]],
-                              'score' : float(round(scores[0][i].numpy(),5))})
+            json_list.append({'image_id': id,
+                              'category_id': yolo2coco[int(classes[0][i])],
+                              'bbox': [float(round(b.numpy(), 3)) for b in
+                                       [x_min[i][0], y_min[i][0], x_max[i][0] - x_min[i][0],
+                                        y_max[i][0] - y_min[i][0]]],
+                              'score': float(round(scores[0][i].numpy(), 5))})
 
             mask = tf.cast(label[:,0],tf.int8) == tf.cast(classes[0][i],tf.int8)
             max_iou, max_idx = tf.reduce_max(tf.where(mask,ious[i],0),-1),tf.argmax(tf.where(mask,ious[i],0),-1)
             max_iou, max_idx = max_iou.numpy(),max_idx.numpy()
+            #print(max_iou,max_idx)
             if max_iou>=0.5 and max_idx not in detected:
                 positive[i]=True
                 detected.append(max_idx)
@@ -116,10 +120,10 @@ if __name__== '__main__':
     parser.add_argument('--only_coco_eval', action='store_true', help='')
     parser.add_argument('--out_json_path',type=str,default='./eval')
     parser.add_argument('--json_path',type=str,default='./eval/results2.json')
-    parser.add_argument('--weight_path',type=str,default='dark_weight/yolov4-tiny.weights')
+    parser.add_argument('--weight_path',type=str,default='dark_weight/yolov4.weights')
     parser.add_argument('--annotation_path', type=str, default='./data/dataset/COCO/annotations')
     parser.add_argument('--is_darknet_weight', action='store_false')
-    parser.add_argument('--is_tiny', action='store_false')
+    parser.add_argument('--is_tiny', action='store_true')
     parser.add_argument('--is_padding', action='store_true')
     parser.add_argument('--confidence_threshold', type=float, default=0.001)
     parser.add_argument('--iou_threshold', type=float, default=0.6)

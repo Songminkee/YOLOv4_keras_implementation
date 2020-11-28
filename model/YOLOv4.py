@@ -78,7 +78,7 @@ class YOLOv4(object):
             xy_grid = tf.expand_dims(tf.stack(xy_grid, -1), 2)
             xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [shape[0], 1, 1, 3, 1]), tf.float32)  # b,h,w,3,2
 
-            pred_xy = ((tf.sigmoid(xy) * self.sigmoid_scale[i])  + xy_grid)
+            pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])-0.5*(self.sigmoid_scale[i]-1)+xy_grid)
             pred_wh = tf.exp(wh) * self.anchors[i]
             pred_cls = tf.sigmoid(cls)
             pred_conf = tf.sigmoid(conf)
@@ -200,7 +200,8 @@ class YOLOv4_tiny(object):
             xy_grid = tf.expand_dims(tf.stack(xy_grid,-1),2)
             xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [shape[0], 1, 1, 3, 1]),tf.float32) # b,h,w,3,2
 
-            pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])+xy_grid)
+            pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])-0.5*(self.sigmoid_scale[i]-1)+xy_grid)
+
             pred_wh = tf.exp(wh)*self.anchors[i]
 
             pred_cls = tf.sigmoid(cls)
