@@ -5,24 +5,24 @@ import random
 import math
 
 class DataLoader(tf.keras.utils.Sequence):
-    def __init__(self,args,hyp,mode='val'):
+    def __init__(self,args,hyp,mode='val',is_padding=True):
         self.hyp = hyp
         self.is_shuffle = args.is_shuffle
         self.batch_size = args.batch_size
-        self.mode = mode # train / test / val
+        self.mode = mode # train / val / eval
         self.classes = load_class_name(args.data_root,args.class_file)
         self.num_classes = args.num_classes
         self.mosaic = args.mosaic
         self.augment = args.augment
         self.img_size = args.img_size
         self.max_label=150
-        self.images_path,self.labels_path = load_coco_image_label_files(args.data_root,mode)
+        self.images_path,self.labels_path = load_coco_image_label_files(args.data_root,mode if mode !='eval' else 'val')
         self.indices = np.arange(len(self.images_path))
+        self.is_padding = is_padding
 
 
     def load_image(self,index):
         img = cv2.imread(self.images_path[index])
-
         h0, w0 = img.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # resize image to img_size
         if r < 1 or (self.augment and r != 1):  # always resize down, only resize up if training with augmentation
@@ -229,18 +229,27 @@ class DataLoader(tf.keras.utils.Sequence):
     def __getitem__(self, index):
         now_index=index
         index = self.indices[index]
-        if self.mosaic:
+        if self.mosaic and self.mode=='train':
             img, label = self.load_mosaic(index)
         else:
-            img,(h0,w0),(h,w) = self.load_image(index)
-            img, ratio, pad = self.letterbox(img, self.img_size, scaleup=(self.augment) and self.mode !='test')
-
-            if self.mode == 'test':
-                return np.expand_dims(cv2.cvtColor(img,cv2.COLOR_BGR2RGB) / 255.0,0)
-
-            #shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
             label = self.load_label(index)
-            label = self.label_padding(label,ratio,pad,h,w)
+            if self.is_padding:
+                img,(h0,w0),(h,w) = self.load_image(index)
+                img, ratio, pad = self.letterbox(img, self.img_size, scaleup=self.augment and self.mode =='train')
+                if self.mode=='eval':
+                    id = int(self.images_path[index].split('/')[-1].split('.')[0])
+                    return np.expand_dims(cv2.cvtColor(img, cv2.COLOR_BGR2RGB) / 255.0, 0), id, pad, (
+                    h0, w0), ratio, label
+                label = self.label_padding(label, ratio, pad, h, w)
+            else:
+                if self.mode == 'eval':
+                    img = cv2.imread(self.images_path[index])
+                    h0,w0,_ =img.shape
+                    img = cv2.resize(np.copy(img), (self.img_size, self.img_size))
+                    id = int(self.images_path[index].split('/')[-1].split('.')[0])
+                    return np.expand_dims(cv2.cvtColor(img,cv2.COLOR_BGR2RGB) / 255.0,0),id,None,(h0, w0),None,label
+
+
         label[:, 1:5] = self.xyxy2xywh(label[:, 1:5])
         label[:, [2, 4]] /= img.shape[0]  # height
         label[:, [1, 3]] /= img.shape[1]  # width
@@ -306,10 +315,7 @@ if __name__== '__main__':
     print(len(dataset))
     for img,label in dataset:
         shape = img.shape
-        # print(shape)
-        # print(label)
         for l in label:
-            #print(l)
             x1 = int(shape[0] * (l[1] - l[3] / 2) + 0.5)
             y1 = int(shape[1] * (l[2] - l[4] / 2) + 0.5)
             x2 = int(shape[0] * (l[1] + l[3] / 2) + 0.5)

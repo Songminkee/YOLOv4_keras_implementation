@@ -90,6 +90,38 @@ def wh_iou(anchor, label):
 
     return inter / (label_w*label_h + anchor_h*anchor_w - inter)  # iou = inter / (area1 + area2 - inter)
 
+def get_iou(pred_box,label,h0,w0):
+    # print('-'*30)
+
+    pred_box = tf.reshape(pred_box,[-1,1,4])
+    pred_box = tf.tile(pred_box,[1,label.shape[0],1])
+    label = tf.reshape(label,[1,-1,4])
+    label = tf.tile(label, [pred_box.shape[0], 1, 1])
+
+    #print(pred_box,label)
+    p_x1, p_y1, p_x2, p_y2 = tf.split(pred_box, [1, 1, 1, 1], -1)
+    l_x1, l_y1, l_x2, l_y2 = tf.split(label, [1, 1, 1, 1], -1)
+    # p_x1, p_y1, p_x2, p_y2 = p_x1/w0, p_y1/h0, p_x2/w0, p_y2/h0
+    # l_x1, l_y1, l_x2, l_y2 = l_x1/w0, l_y1/h0, l_x2/w0, l_y2/h0
+    pw,ph,lw,lh = p_x2-p_x1,p_y2-p_y1,l_x2-l_x1,l_y2-l_y1
+
+    con_x1 = tf.concat([p_x1, l_x1], -1)
+    con_x2 = tf.concat([p_x2, l_x2], -1)
+    con_y1 = tf.concat([p_y1, l_y1], -1)
+    con_y2 = tf.concat([p_y2, l_y2], -1)
+
+    inter = tf.expand_dims((tf.reduce_min(con_x2, -1) - tf.reduce_max(con_x1, -1)) * \
+                           (tf.reduce_min(con_y2, -1) - tf.reduce_max(con_y1, -1)), -1)
+    # print(con_x2,con_x1)
+    # print(tf.reduce_min(con_x2, -1) - tf.reduce_max(con_x1, -1))
+    # print(tf.reduce_min(con_y2, -1) - tf.reduce_max(con_y1, -1))
+    # print("inter",inter)
+    union = (pw * ph + 1e-16) + lw * lh - inter
+    # print("union",union)
+    # print("iou",tf.squeeze(inter / union))
+    # print('-' * 30)
+    return tf.squeeze(inter / union)
+
 def label_scaler(out):
     b,h,w,_,_ = out.shape
     return tf.cast(tf.reshape([1,w,h,w,h],[1,1,5]),tf.float32)
@@ -120,8 +152,8 @@ def get_iou_loss(pred,label,method='GIoU'):
     con_y1 = tf.concat([p_y1, l_y1], -1)
     con_y2 = tf.concat([p_y2, l_y2], -1)
 
-    inter = tf.expand_dims((tf.reduce_min(con_x2,-1) - tf.reduce_min(con_x1,-1)) * \
-            (tf.reduce_min(con_y2, -1) - tf.reduce_min(con_y1, -1)),-1)
+    inter = tf.expand_dims((tf.reduce_min(con_x2,-1) - tf.reduce_max(con_x1,-1)) * \
+            (tf.reduce_min(con_y2, -1) - tf.reduce_max(con_y1, -1)),-1)
 
     union = (pw * ph + 1e-16) + lw*lh - inter
     iou = inter/union
@@ -244,7 +276,69 @@ def inference(yolo,input,args):
             cls_conf, (args.batch_size, -1, tf.shape(cls_conf)[-1])),
         max_output_size_per_class=50,
         max_total_size=50,
-        iou_threshold=0.5,
-        score_threshold=0.25
+        iou_threshold=args.iou_threshold,
+        score_threshold=args.score_threshold,
     )
     return boxes, scores, classes, valid_detections
+
+def convert_to_origin_shape(box,pad=None,ratio=None,h0=None,w0=None,h=None,w=None,is_padding=False):
+    y_min, x_min, y_max, x_max = tf.split(box,[1,1,1,1],-1)
+    if is_padding:
+        left = int(round(pad[0] - 0.1))
+        top = int(round(pad[1] - 0.1))
+        x_min = (x_min * w - left) / ratio[0] / (w - pad[0] * 2) * w0
+        y_min = (y_min * h - top) / ratio[1] / (h - pad[1] * 2) * h0
+        x_max = (x_max * w - left) / ratio[0] / (w - pad[0] * 2) * w0
+        y_max = (y_max * h - top) / ratio[1] / (h - pad[1] * 2) * h0
+    else:
+        x_min *= w0
+        y_min *= h0
+        x_max *= w0
+        y_max *= h0
+    return y_min,x_min,y_max,x_max
+
+
+def scaled_xywh2xyxy(box,h,w):
+    xyxy = np.zeros_like(box)
+    xyxy[:, 0] = (box[:, 0] - box[:, 2] / 2) * w
+    xyxy[:, 1] = (box[:, 1] - box[:, 3] / 2) * h
+    xyxy[:, 2] = (box[:, 0] + box[:, 2] / 2) * w
+    xyxy[:, 3] = (box[:, 1] + box[:, 3] / 2) * h
+    return xyxy
+
+def ap_per_class(tp,conf,pred_cls,label_cls):
+    i = np.argsort(-conf)
+
+    tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
+    unique_cls = np.unique(label_cls)
+    ap,p,r = np.zeros(len(unique_cls)) , np.zeros(len(unique_cls)), np.zeros(len(unique_cls))
+    for ci, c in enumerate(unique_cls):
+        i = pred_cls == c
+        n_gt = np.sum(label_cls==c)
+        n_p = np.sum(i)
+
+        if not n_gt or not n_p:
+            continue
+        # Accumulate FPs and TPs
+        fpc = np.cumsum(1-tp[i])
+        tpc = np.cumsum(tp[i])
+
+        # Recall
+        recall = tpc / (n_gt + 1e-16)  # recall curve
+        r[ci] = np.interp(-0.1, -conf[i], recall)  # r at pr_score, negative x, xp because xp decreases
+
+        # Precision
+        precision = tpc / (tpc + fpc)
+        p[ci] = np.interp(-0.1, -conf[i], precision)
+
+        mrec = np.concatenate(([0.], recall, [min(recall[-1] + 1E-3, 1.)]))
+        mpre = np.concatenate(([0.], precision, [0.]))
+
+        # Compute the precision envelope
+        mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
+        x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
+        ap[ci] = np.trapz(np.interp(x, mrec, mpre), x)  # integrate
+
+    # Compute F1 score (harmonic mean of precision and recall)
+    f1 = 2 * p * r / (p + r + 1e-16)
+    return p, r, ap, f1, unique_cls.astype('int32')
