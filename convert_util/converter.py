@@ -12,18 +12,18 @@ from Format import COCO,YOLO
 
 parser = argparse.ArgumentParser(description='label Converting example.')
 
-parser.add_argument('--img_path', type=str, help='directory of image folder')
+parser.add_argument('--img_path', type=str, help='directory of image folder',default='./data/dataset/COCO/images/train2017/')
 parser.add_argument('--label', type=str,
-                    help='directory of label folder or label file path',default="")
+                    help='directory of label folder or label file path',default="./data/dataset/COCO/annotations/instances_train2017.json")
 parser.add_argument('--convert_output_path', type=str,
-                    help='directory of label folder', default="./label")
-parser.add_argument('--img_type', type=str, help='type of image')
+                    help='directory of label folder', default="./data/dataset/COCO/labels/train2017")
+parser.add_argument('--img_type', type=str, help='type of image',default= '.jpg')
 parser.add_argument('--manifest_path', type=str,
-                    help='directory of manipast file', default="./")
+                    help='directory of manipast file', default="./data/dataset/")
 parser.add_argument('--cls_list_file', type=str,
-                    help='directory of *.names file', default="./")
+                    help='directory of *.names file', default="./data/dataset/COCO/annotations/coco.names")
 parser.add_argument('--manifest_name', type=str,
-                    help='name of manipast file', default="manifest")
+                    help='name of manipast file', default="coco_train2017")
 parser.add_argument('--no_label', action='store_true',
                     help='name of manipast file')
 
