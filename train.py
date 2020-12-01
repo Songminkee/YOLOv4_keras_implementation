@@ -206,6 +206,9 @@ if __name__== '__main__':
     parser.add_argument('--img_size',              type=int,   help='Size of input image. / default : 416', default=416)
     parser.add_argument('--data_root',              type=str,   help='Root path of class name file and coco_%2017.txt / default : "./data"'
                                                                      , default='./data')
+    parser.add_argument('--data_name', type=str,
+                        help='Root path of class name file and coco_%2017.txt / default : "./data"'
+                        , default='coco')
     parser.add_argument('--class_file',              type=str,   help='Class name file / default : "coco.name"', default='coco.names')
     parser.add_argument('--num_classes', type=int, help='Number of classes (in COCO 80) / default : 80', default=80)
     parser.add_argument('--augment',              action='store_false',   help='Flag of augmentation (hsv, flip, random affine) / default : true')

@@ -51,6 +51,12 @@ def load_coco_image_label_files(data_root_path,mode):
     labels_path = ['/'+os.path.join(*im_path.split('/')[1:-3])+'/labels/{}2017/'.format(mode)+im_path.strip('jpg').split('/')[-1]+'txt' for im_path in images_path]
     return images_path,labels_path
 
+def load_image_label_files(data_root_path,data_name,mode):
+    image_txt_path = data_root_path+'/dataset/{}_{}.txt'.format(data_name,mode)
+    images_path = [l.strip('\n') for l in open(image_txt_path,'r')]
+    labels_path = ['/'+os.path.join(*im_path.split('/')[1:-3])+'/labels/{}/'.format(mode)+im_path.strip('jpg').split('/')[-1]+'txt' for im_path in images_path]
+    return images_path,labels_path
+
 def make_anchor(stride,anchor,is_tiny=False):
     if is_tiny:
         return np.reshape(anchor,(-1,3,2))/np.reshape(stride,(2,1,1))

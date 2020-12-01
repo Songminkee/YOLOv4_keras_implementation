@@ -16,7 +16,12 @@ class DataLoader(tf.keras.utils.Sequence):
         self.augment = args.augment
         self.img_size = args.img_size
         self.max_label=150
-        self.images_path,self.labels_path = load_coco_image_label_files(args.data_root,mode if mode !='eval' else 'val')
+        if args.data_name =='coco':
+            self.images_path,self.labels_path = load_coco_image_label_files(args.data_root,mode if mode !='eval' else 'val')
+        else:
+            self.images_path, self.labels_path = load_image_label_files(args.data_root,args.data_name,
+                                                                             mode if mode != 'eval' else 'val')
+
         self.indices = np.arange(len(self.images_path))
         self.is_padding = is_padding
 

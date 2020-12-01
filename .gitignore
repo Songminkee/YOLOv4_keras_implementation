@@ -10,3 +10,4 @@ coco_train2017.txt
 coco_test2017.txt
 .vscode/
 eval/
+box_dataset/
