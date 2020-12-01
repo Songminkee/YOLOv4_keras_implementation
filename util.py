@@ -90,19 +90,15 @@ def wh_iou(anchor, label):
 
     return inter / (label_w*label_h + anchor_h*anchor_w - inter)  # iou = inter / (area1 + area2 - inter)
 
-def get_iou(pred_box,label,h0,w0):
-    # print('-'*30)
+def get_iou(pred_box,label):
 
     pred_box = tf.reshape(pred_box,[-1,1,4])
     pred_box = tf.tile(pred_box,[1,label.shape[0],1])
     label = tf.reshape(label,[1,-1,4])
     label = tf.tile(label, [pred_box.shape[0], 1, 1])
 
-    #print(pred_box,label)
     p_x1, p_y1, p_x2, p_y2 = tf.split(pred_box, [1, 1, 1, 1], -1)
     l_x1, l_y1, l_x2, l_y2 = tf.split(label, [1, 1, 1, 1], -1)
-    # p_x1, p_y1, p_x2, p_y2 = p_x1/w0, p_y1/h0, p_x2/w0, p_y2/h0
-    # l_x1, l_y1, l_x2, l_y2 = l_x1/w0, l_y1/h0, l_x2/w0, l_y2/h0
     pw,ph,lw,lh = p_x2-p_x1,p_y2-p_y1,l_x2-l_x1,l_y2-l_y1
 
     con_x1 = tf.concat([p_x1, l_x1], -1)
@@ -112,14 +108,9 @@ def get_iou(pred_box,label,h0,w0):
 
     inter = tf.expand_dims((tf.reduce_min(con_x2, -1) - tf.reduce_max(con_x1, -1)) * \
                            (tf.reduce_min(con_y2, -1) - tf.reduce_max(con_y1, -1)), -1)
-    # print(con_x2,con_x1)
-    # print(tf.reduce_min(con_x2, -1) - tf.reduce_max(con_x1, -1))
-    # print(tf.reduce_min(con_y2, -1) - tf.reduce_max(con_y1, -1))
-    # print("inter",inter)
+
     union = (pw * ph + 1e-16) + lw * lh - inter
-    # print("union",union)
-    # print("iou",tf.squeeze(inter / union))
-    # print('-' * 30)
+
     return tf.squeeze(inter / union)
 
 def label_scaler(out):
@@ -180,12 +171,18 @@ def smoothing_value(classes,eps=0.0):
     return (1.0-eps),eps/classes
 
 # https://github.com/hunglc007/tensorflow-yolov4-tflite
-def load_darknet_weights(model, weights_file, is_tiny=False):
+def load_darknet_weights(model, weights_file, is_tiny=False,include_top=True):
     if is_tiny:
-        layer_size = 21
+        if include_top:
+            layer_size = 21
+        else:
+            layer_size = 15
         output_pos = [17, 20]
     else:
-        layer_size = 110
+        if include_top:
+            layer_size = 110
+        else:
+            layer_size = 78
         output_pos = [93, 101, 109]
     wf = open(weights_file, 'rb')
     major, minor, revision, seen, _ = np.fromfile(wf, dtype=np.int32, count=5)
@@ -242,6 +239,12 @@ def merge_info(box,classes,stride):
     return tf.concat([xywh, cls],-1)
 
 def inference(yolo,input,args):
+    '''
+    :param yolo: Yolo model class
+    :param input: Input image
+    :param args: args must have information about confidence_threshold, img_size,batch_size,iou_threshold, score_threshold.
+    :return: boxes, scores, classes, valid_detections information through NMS
+    '''
     boxes = yolo.model(input,training=False)
     boxes = tf.concat([merge_info(box, yolo.num_classes, yolo.stride[i]) for i, box in enumerate(boxes)], 1)
 
@@ -283,6 +286,9 @@ def inference(yolo,input,args):
     return boxes, scores, classes, valid_detections
 
 def convert_to_origin_shape(box,pad=None,ratio=None,h0=None,w0=None,h=None,w=None,is_padding=False):
+    '''
+    :return: Convert the box information to information about the original original image.
+    '''
     y_min, x_min, y_max, x_max = tf.split(box,[1,1,1,1],-1)
     if is_padding:
         left = int(round(pad[0] - 0.1))

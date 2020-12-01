@@ -45,7 +45,7 @@ def test(args,hyp,test_set):
         y_min, x_min, y_max, x_max = convert_to_origin_shape(boxes[0], pad, ratio, h0, w0, h, w, args.is_padding)
 
         n_box = tf.concat([x_min, y_min, x_max, y_max], -1)
-        ious = get_iou(n_box, label[:, 1:], h0, w0)
+        ious = get_iou(n_box, label[:, 1:])
 
         for i in range(valid_detections[0].numpy()):
             json_list.append({'image_id': id,

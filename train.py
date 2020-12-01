@@ -9,6 +9,7 @@ from model import YOLOv4
 from dataloader import loader
 import numpy as np
 import time
+from util import load_darknet_weights
 import gc
 
 #print(tf.config.experimental.list_physical_devices('GPU'))
@@ -69,8 +70,13 @@ def train(args,hyp):
     
     # load pretrained model
     if args.weight_path!='':
-        print('load_model from {}'.format(args.weight_path))
-        YOLO.model.load_weights(args.weight_path)
+        if args.is_darknet_weight:
+            print('load darkent weight from {}'.format(args.weight_path))
+            print('include_top = ',args.include_top)
+            load_darknet_weights(YOLO.model, args.weight_path, args.is_tiny,args.include_top)
+        else:
+            print('load_model from {}'.format(args.weight_path))
+            YOLO.model.load_weights(args.weight_path)
 
     if not os.path.exists(args.weight_save_path):
         os.makedirs(args.weight_save_path)
@@ -212,6 +218,10 @@ if __name__== '__main__':
     parser.add_argument('--warmup_steps', type = int, default=1000, help = 'This is the total iteration of warm up to be carried out based on 64 batches. So the steps will be warm up_steps * 64 / batch_size. Used only when the warmup_by_steps flag is true. / default : 1000')
     parser.add_argument('--warmup_epochs', type=int, default=3, help ='Total epochs to warm up. Used only when the warmup_by_steps flag is false. / default : 3')
     parser.add_argument('--save_steps', type=int, default=1000, help ='Step cycle to store weight. /default : 1000')
+    parser.add_argument('--is_darknet_weight', action='store_true',
+                        help='If true, load the weight file used by the darknet framework.')
+    parser.add_argument('--include_top', action='store_true',
+                        help='If true, load all weight file used by the darknet framework.')
     parser.add_argument('--is_tiny', action='store_true', help ='Flag for using tiny. / default : false')
     parser.add_argument('--soft',type=float,default=0.0, help = 'This is a value for soft labeling, and soft/num_class becomes the label for negative class. / default : 0.0' )
     parser.add_argument('--log_path', type=str, default='./log/tiny', help = 'logdir path for Tensorboard')
