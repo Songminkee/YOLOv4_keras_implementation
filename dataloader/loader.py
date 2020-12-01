@@ -31,9 +31,13 @@ class DataLoader(tf.keras.utils.Sequence):
         return img, (h0, w0), img.shape[:2]
 
     def load_label(self,index):
-        label = np.array([l.strip('\n').split() for l in open(self.labels_path[index]).readlines()],np.float32)
-        assert np.unique(label, axis=0).shape[0],'{} have no label'.format(self.labels_path[index])
-        assert label.shape[1]==5, '{} have not efficient columns'.format(self.labels_path[index])
+        if self.num_classes>1:
+            label = np.array([l.strip('\n').split() for l in open(self.labels_path[index]).readlines()],np.float32)
+            assert np.unique(label, axis=0).shape[0],'{} have no label'.format(self.labels_path[index])
+            assert label.shape[1]==5, '{} have not efficient columns'.format(self.labels_path[index])
+        else:
+            label = np.array([l.strip('\n').split() for l in open(self.labels_path[index]).readlines()],np.float32)
+            label = np.concatenate([np.zeros([label.shape[0],1],np.float32),label],-1)
         return label
 
     def letterbox(self,img, new_shape=(416, 416), color=(114, 114, 114), scaleup=False):
