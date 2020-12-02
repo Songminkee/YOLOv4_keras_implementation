@@ -43,14 +43,14 @@ class YOLOv4(object):
         x = tf.concat([conv2d(r3, 128, 1, activation='leaky'),x], -1)
         route2 = convset(x, 128)
         box1 = conv2d(route2, 256, 3, activation='leaky')
-        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
+        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) if self.num_classes>1 else 3*5, 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01))(box1)
 
         x = tf.concat([conv2d(route2, 256, 3, 2, activation='leaky'),route1], -1)
         route3 = convset(x, 256)
         box2 = conv2d(route3, 512, 3, activation='leaky')
-        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
+        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) if self.num_classes>1 else 3*5, 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box2)
@@ -58,7 +58,7 @@ class YOLOv4(object):
         x = tf.concat([ conv2d(route3, 512, 3, 2, activation='leaky'),r1], -1)
         x = convset(x, 512)
         box3 = conv2d(x, 1024, 3, activation='leaky')
-        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
+        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) if self.num_classes>1 else 3*5, 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box3)
@@ -69,9 +69,13 @@ class YOLOv4(object):
         pred = []
         for i, box in enumerate(boxes):
             box_shape = box.shape
-            box = tf.reshape(box, (-1, box_shape[1], box_shape[2], 3, self.num_classes + 5))
+            box = tf.reshape(box, (-1, box_shape[1], box_shape[2], 3, self.num_classes + 5 if self.num_classes>1 else 5))
 
-            xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
+            if self.num_classes>1:
+                xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
+                pred_cls = tf.sigmoid(cls)
+            else:
+                xy, wh, conf = tf.split(box, ([2, 2, 1]), -1)
             shape = tf.shape(xy)
 
             xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1]))  # w,h
@@ -80,9 +84,11 @@ class YOLOv4(object):
 
             pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])-0.5*(self.sigmoid_scale[i]-1)+xy_grid)
             pred_wh = tf.exp(wh) * self.anchors[i]
-            pred_cls = tf.sigmoid(cls)
             pred_conf = tf.sigmoid(conf)
-            pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
+            if self.num_classes>1:
+                pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
+            else:
+                pred.append(tf.concat([pred_xy, pred_wh, pred_conf], -1))
 
         return pred
 
@@ -98,7 +104,11 @@ class YOLOv4(object):
             c_label, box = tf.split(label,[1,4],-1)
 
             pred = tf.gather_nd(out[i],idx)
-            xywh,conf,cls = tf.split(pred,[4,1,self.num_classes],-1)
+
+            if self.num_classes>1:
+                xywh,conf,cls = tf.split(pred,[4,1,self.num_classes],-1)
+            else:
+                xywh, conf = tf.split(pred, [4, 1], -1)
 
             # get giou or ciou or diou
             iou = tf.clip_by_value(get_iou_loss(xywh,box),0.0,1.0) # [b,max_label,3,1]
@@ -106,32 +116,39 @@ class YOLOv4(object):
             # get obj(confidence) loss by iou
             l_obj = tf.expand_dims(bce((1.0-self.gr) + self.gr*iou, conf),-1) # [b,max_label,3,1]
 
-            # get class_loss
-            c_label = tf.one_hot(tf.cast(tf.squeeze(c_label),tf.int32), self.num_classes, on_value=cp, off_value=cn)
-            l_cls = tf.expand_dims(bce(c_label,cls),-1) # [b,max_label,3,1]
+            mask_num = tf.reduce_sum(tf.cast(mask, tf.float32))
+            l_iou = tf.reduce_sum(tf.where(mask, 1 - iou, 0)) / (mask_num + 1e-16)
+            l_obj = tf.reduce_sum(tf.where(mask, l_obj, 0)) / (mask_num + 1e-16)
 
-            mask_num = tf.reduce_sum(tf.cast(mask,tf.float32))
-            l_iou = tf.reduce_sum(tf.where(mask,1-iou,0))/(mask_num+1e-16)
-            l_obj = tf.reduce_sum(tf.where(mask,l_obj,0))/(mask_num+1e-16)
-            l_cls = tf.reduce_sum(tf.where(mask,l_cls,0))/(mask_num+1e-16)
+            # get class_loss
+            if self.num_classes>1:
+                c_label = tf.one_hot(tf.cast(tf.squeeze(c_label),tf.int32), self.num_classes, on_value=cp, off_value=cn)
+                l_cls = tf.expand_dims(bce(c_label,cls),-1) # [b,max_label,3,1]
+                l_cls = tf.reduce_sum(tf.where(mask,l_cls,0))/(mask_num+1e-16)
+                class_loss += l_cls
 
             iou_loss += l_iou
             object_loss += l_obj
-            class_loss += l_cls
 
             if writer != None:
                 with writer.as_default():
                     tf.summary.scalar("l_iou_{}".format(i), l_iou, step=step)
                     tf.summary.scalar("l_obj_{}".format(i), l_obj, step=step)
-                    tf.summary.scalar("l_cls_{}".format(i), l_cls, step=step)
+                    if self.num_classes > 1:
+                        tf.summary.scalar("l_cls_{}".format(i), l_cls, step=step)
 
-        loss = iou_loss*self.hyp['giou'] + object_loss * self.hyp['obj'] + class_loss * self.hyp['cls']
+        if self.num_classes > 1:
+            loss = iou_loss*self.hyp['giou'] + object_loss * self.hyp['obj'] + class_loss * self.hyp['cls']
+        else:
+            loss = iou_loss * self.hyp['giou'] + object_loss * self.hyp['obj']
+
         if writer != None:
             with writer.as_default():
                 tf.summary.scalar("iou_loss", iou_loss, step=step)
                 tf.summary.scalar("object_loss", object_loss, step=step)
-                tf.summary.scalar("class_loss", class_loss, step=step)
-                tf.summary.scalar("loss",class_loss,step=step)
+                if self.num_classes > 1:
+                   tf.summary.scalar("class_loss", class_loss, step=step)
+                tf.summary.scalar("loss",loss,step=step)
 
         return loss *  self.batch_size / 64
 
@@ -170,7 +187,7 @@ class YOLOv4_tiny(object):
         x = conv2d(r2, 256, 1, activation='leaky')
 
         box2 = conv2d(x, 512, 3, activation='leaky')
-        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
+        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) if self.num_classes>1 else 3*5, 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box2)
@@ -179,7 +196,7 @@ class YOLOv4_tiny(object):
         x = upsample(x)
         x = tf.concat([x, r1], -1)
         box1 = conv2d(x, 256, 3, activation='leaky')
-        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
+        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) if self.num_classes>1 else 3*5, 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box1)
@@ -210,54 +227,66 @@ class YOLOv4_tiny(object):
 
         return pred
 
-    def loss(self,box_label,out,step=None,writer=None):
+    def loss(self, box_label, out, step=None, writer=None):
         bce = tf.keras.losses.BinaryCrossentropy(False, reduction=tf.keras.losses.Reduction.NONE)
-        cp,cn = smoothing_value(self.num_classes,self.soft)
+        cp, cn = smoothing_value(self.num_classes, self.soft)
         iou_loss, object_loss, class_loss = 0, 0, 0
         for i in range(2):
             scaler = tf.stop_gradient(label_scaler(out[i]))
-            label = box_label*scaler
-            mask,idx,label = build_target(self.anchors[i],label,self.hyp)
+            label = box_label * scaler
+            mask, idx, label = build_target(self.anchors[i], label, self.hyp)
 
-            c_label, box = tf.split(label,[1,4],-1)
+            c_label, box = tf.split(label, [1, 4], -1)
 
-            pred = tf.gather_nd(out[i],idx)
-            xywh,conf,cls = tf.split(pred,[4,1,self.num_classes],-1)
+            pred = tf.gather_nd(out[i], idx)
+
+            if self.num_classes > 1:
+                xywh, conf, cls = tf.split(pred, [4, 1, self.num_classes], -1)
+            else:
+                xywh, conf = tf.split(pred, [4, 1], -1)
 
             # get giou or ciou or diou
-            iou = tf.clip_by_value(get_iou_loss(xywh,box),0.0,1.0) # [b,max_label,3,1]
+            iou = tf.clip_by_value(get_iou_loss(xywh, box), 0.0, 1.0)  # [b,max_label,3,1]
 
             # get obj(confidence) loss by iou
-            l_obj = tf.expand_dims(bce((1.0-self.gr) + self.gr*iou, conf),-1) # [b,max_label,3,1]
+            l_obj = tf.expand_dims(bce((1.0 - self.gr) + self.gr * iou, conf), -1)  # [b,max_label,3,1]
+
+            mask_num = tf.reduce_sum(tf.cast(mask, tf.float32))
+            l_iou = tf.reduce_sum(tf.where(mask, 1 - iou, 0)) / (mask_num + 1e-16)
+            l_obj = tf.reduce_sum(tf.where(mask, l_obj, 0)) / (mask_num + 1e-16)
 
             # get class_loss
-            c_label = tf.one_hot(tf.cast(tf.squeeze(c_label),tf.int32), self.num_classes, on_value=cp, off_value=cn)
-            l_cls = tf.expand_dims(bce(c_label,cls),-1) # [b,max_label,3,1]
-
-            mask_num = tf.reduce_sum(tf.cast(mask,tf.float32))
-            l_iou = tf.reduce_sum(tf.where(mask,1-iou,0))/(mask_num+1e-16)
-            l_obj = tf.reduce_sum(tf.where(mask,l_obj,0))/(mask_num+1e-16)
-            l_cls = tf.reduce_sum(tf.where(mask,l_cls,0))/(mask_num+1e-16)
+            if self.num_classes > 1:
+                c_label = tf.one_hot(tf.cast(tf.squeeze(c_label), tf.int32), self.num_classes, on_value=cp,
+                                     off_value=cn)
+                l_cls = tf.expand_dims(bce(c_label, cls), -1)  # [b,max_label,3,1]
+                l_cls = tf.reduce_sum(tf.where(mask, l_cls, 0)) / (mask_num + 1e-16)
+                class_loss += l_cls
 
             iou_loss += l_iou
             object_loss += l_obj
-            class_loss += l_cls
 
             if writer != None:
                 with writer.as_default():
                     tf.summary.scalar("l_iou_{}".format(i), l_iou, step=step)
                     tf.summary.scalar("l_obj_{}".format(i), l_obj, step=step)
-                    tf.summary.scalar("l_cls_{}".format(i), l_cls, step=step)
+                    if self.num_classes > 1:
+                        tf.summary.scalar("l_cls_{}".format(i), l_cls, step=step)
 
-        loss = iou_loss*self.hyp['giou'] + object_loss * self.hyp['obj'] + class_loss * self.hyp['cls']
+        if self.num_classes > 1:
+            loss = iou_loss * self.hyp['giou'] + object_loss * self.hyp['obj'] + class_loss * self.hyp['cls']
+        else:
+            loss = iou_loss * self.hyp['giou'] + object_loss * self.hyp['obj']
+
         if writer != None:
             with writer.as_default():
                 tf.summary.scalar("iou_loss", iou_loss, step=step)
                 tf.summary.scalar("object_loss", object_loss, step=step)
-                tf.summary.scalar("class_loss", class_loss, step=step)
-                tf.summary.scalar("loss",class_loss,step=step)
+                if self.num_classes > 1:
+                    tf.summary.scalar("class_loss", class_loss, step=step)
+                tf.summary.scalar("loss", loss, step=step)
 
-        return loss *  self.batch_size / 64
+        return loss * self.batch_size / 64
 
 
 
