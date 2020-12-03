@@ -180,13 +180,13 @@ def train(args,hyp):
 
         if args.summary:
             with writer.as_default():
-                tf.summary.scalar("val_loss", validation_loss*64/args.batch_size/val_len, step=global_step)
+                tf.summary.scalar("val_loss", validation_loss*64/val_len, step=global_step)
 
         # log print
         time_sofar = (time.time() - start_time) / 3600
         training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
         print("=> Epoch:%4d | VAL STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (
-        epoch, global_step.numpy(), validation_loss*64/args.batch_size/val_len, time_sofar, training_time_left))
+        epoch, global_step.numpy(), validation_loss*64/val_len, time_sofar, training_time_left))
 
         # exit condition
         if global_step.numpy()==total_steps:

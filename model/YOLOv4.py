@@ -150,7 +150,7 @@ class YOLOv4(object):
                    tf.summary.scalar("class_loss", class_loss, step=step)
                 tf.summary.scalar("loss",loss,step=step)
 
-        return loss *  self.batch_size / 64
+        return loss / 64
 
 
 class YOLOv4_tiny(object):
@@ -286,7 +286,7 @@ class YOLOv4_tiny(object):
                     tf.summary.scalar("class_loss", class_loss, step=step)
                 tf.summary.scalar("loss", loss, step=step)
 
-        return loss * self.batch_size / 64
+        return loss / 64
 
 
 
