@@ -133,7 +133,8 @@ def build_target(anchor,label,hyp):
     mask = iou > hyp['iou_t']
     idx = get_idx(label)
     label = tf.tile(tf.expand_dims(label,2),[1,1,3,1])
-    return tf.stop_gradient(mask),tf.stop_gradient(idx),tf.stop_gradient(label)
+    is_label = tf.reduce_sum(label, -1, keepdims=True) != 0
+    return tf.stop_gradient(mask),tf.stop_gradient(idx),tf.stop_gradient(label),is_label
 
 def get_iou_loss(pred,label,method='GIoU'):
     px, py, pw, ph = tf.split(pred, [1, 1, 1, 1], -1)

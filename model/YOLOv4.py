@@ -99,7 +99,7 @@ class YOLOv4(object):
         for i in range(3):
             scaler = tf.stop_gradient(label_scaler(out[i]))
             label = box_label*scaler
-            mask,idx,label = build_target(self.anchors[i],label,self.hyp)
+            mask,idx,label,is_label = build_target(self.anchors[i],label,self.hyp)
 
             c_label, box = tf.split(label,[1,4],-1)
 
@@ -107,8 +107,10 @@ class YOLOv4(object):
 
             if self.num_classes>1:
                 xywh,conf,cls = tf.split(pred,[4,1,self.num_classes],-1)
+                _, all_conf, _ = tf.split(out[i], [4, 1, self.num_classes], -1)
             else:
                 xywh, conf = tf.split(pred, [4, 1], -1)
+                _, all_conf = tf.split(out[i], [4, 1], -1)
 
             # get giou or ciou or diou
             iou = tf.clip_by_value(get_iou_loss(xywh,box),0.0,1.0) # [b,max_label,3,1]
@@ -119,6 +121,8 @@ class YOLOv4(object):
             mask_num = tf.reduce_sum(tf.cast(mask, tf.float32))
             l_iou = tf.reduce_sum(tf.where(mask, 1 - iou, 0)) / (mask_num + 1e-16)
             l_obj = tf.reduce_sum(tf.where(mask, l_obj, 0)) / (mask_num + 1e-16)
+            l_noobj = tf.expand_dims(bce(0, all_conf), -1)
+            l_noobj = (tf.reduce_sum(l_noobj) - tf.reduce_sum(tf.where(is_label, tf.gather_nd(l_noobj, idx), 0))) / (self.batch_size*tf.shape(out[i])[1]**2-mask_num)
 
             # get class_loss
             if self.num_classes>1:
@@ -128,7 +132,7 @@ class YOLOv4(object):
                 class_loss += l_cls
 
             iou_loss += l_iou
-            object_loss += l_obj
+            object_loss += l_obj+l_noobj
 
             if writer != None:
                 with writer.as_default():
@@ -150,7 +154,7 @@ class YOLOv4(object):
                    tf.summary.scalar("class_loss", class_loss, step=step)
                 tf.summary.scalar("loss",loss,step=step)
 
-        return loss / 64
+        return loss *self.batch_size/ 64
 
 
 class YOLOv4_tiny(object):
@@ -234,7 +238,7 @@ class YOLOv4_tiny(object):
         for i in range(2):
             scaler = tf.stop_gradient(label_scaler(out[i]))
             label = box_label * scaler
-            mask, idx, label = build_target(self.anchors[i], label, self.hyp)
+            mask, idx, label,is_label = build_target(self.anchors[i], label, self.hyp)
 
             c_label, box = tf.split(label, [1, 4], -1)
 
@@ -242,8 +246,10 @@ class YOLOv4_tiny(object):
 
             if self.num_classes > 1:
                 xywh, conf, cls = tf.split(pred, [4, 1, self.num_classes], -1)
+                _, all_conf, _ = tf.split(out[i], [4, 1, self.num_classes], -1)
             else:
                 xywh, conf = tf.split(pred, [4, 1], -1)
+                _, all_conf = tf.split(out[i], [4, 1], -1)
 
             # get giou or ciou or diou
             iou = tf.clip_by_value(get_iou_loss(xywh, box), 0.0, 1.0)  # [b,max_label,3,1]
@@ -254,6 +260,8 @@ class YOLOv4_tiny(object):
             mask_num = tf.reduce_sum(tf.cast(mask, tf.float32))
             l_iou = tf.reduce_sum(tf.where(mask, 1 - iou, 0)) / (mask_num + 1e-16)
             l_obj = tf.reduce_sum(tf.where(mask, l_obj, 0)) / (mask_num + 1e-16)
+            l_noobj = tf.expand_dims(bce(0, all_conf), -1)
+            l_noobj = (tf.reduce_sum(l_noobj) - tf.reduce_sum(tf.where(is_label, tf.gather_nd(l_noobj, idx), 0))) / (self.batch_size*tf.shape(out[i])[1]**2-mask_num)
 
             # get class_loss
             if self.num_classes > 1:
@@ -264,7 +272,7 @@ class YOLOv4_tiny(object):
                 class_loss += l_cls
 
             iou_loss += l_iou
-            object_loss += l_obj
+            object_loss += (l_obj+l_noobj)
 
             if writer != None:
                 with writer.as_default():
@@ -286,7 +294,7 @@ class YOLOv4_tiny(object):
                     tf.summary.scalar("class_loss", class_loss, step=step)
                 tf.summary.scalar("loss", loss, step=step)
 
-        return loss / 64
+        return loss *self.batch_size/ 64
 
 
 
