@@ -213,14 +213,7 @@ class DataLoader(tf.keras.utils.Sequence):
             # np.clip(labels4[:, 1:] - s / 2, 0, s, out=labels4[:, 1:])  # use with center crop
             np.clip(labels4[:, 1:], 0, 2 * s, out=labels4[:, 1:])  # use with random_affine
 
-        # Augment
-        # img4 = img4[s // 2: int(s * 1.5), s // 2:int(s * 1.5)]  # center crop (WARNING, requires box pruning)
-        img4, labels4 = self.random_affine(img4, labels4,
-                                      degrees=self.hyp['degrees'],
-                                      translate=self.hyp['translate'],
-                                      scale=self.hyp['scale'],
-                                      shear=self.hyp['shear'],
-                                      border=-s // 2)  # border to remove
+
         return img4, labels4
     def get_anchors(self):
         self.stride = default_stride()
@@ -258,6 +251,15 @@ class DataLoader(tf.keras.utils.Sequence):
                     id = int(self.images_path[index].split('/')[-1].split('.')[0])
                     return np.expand_dims(cv2.cvtColor(img,cv2.COLOR_BGR2RGB) / 255.0,0),id,None,(h0, w0),None,label
 
+        if self.augment:
+            # Augment
+            # img4 = img4[s // 2: int(s * 1.5), s // 2:int(s * 1.5)]  # center crop (WARNING, requires box pruning)
+            img, label = self.random_affine(img, label,
+                                               degrees=self.hyp['degrees'],
+                                               translate=self.hyp['translate'],
+                                               scale=self.hyp['scale'],
+                                               shear=self.hyp['shear'],
+                                               border=-self.img_size//4 if self.mosaic else 0)  # border to remove
 
         label[:, 1:5] = self.xyxy2xywh(label[:, 1:5])
         label[:, [2, 4]] /= img.shape[0]  # height
@@ -273,6 +275,9 @@ class DataLoader(tf.keras.utils.Sequence):
             if random.random() < 0.5:
                 img = np.flipud(img)
                 label[:,2] = 1-label[:,2]
+
+        if img.shape[0] != self.img_size or img.shape[1] != self.img_size:
+            img = cv2.resize(img, (self.img_size, self.img_size))
 
         img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
         label_out = np.zeros([self.max_label,5])

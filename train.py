@@ -139,9 +139,6 @@ def train(args,hyp):
     def test_step(images, labels,YOLO):
         pred = YOLO.model(images)
         loss_val = YOLO.loss(labels, pred)
-        if args.summary:
-            with writer.as_default():
-                tf.summary.scalar("val_loss", loss_val, step=global_step)
         return loss_val
 
     # accum gradient init
@@ -167,8 +164,8 @@ def train(args,hyp):
             if global_step.numpy() <= warmup_steps:
                 YOLO.gr = global_step.numpy() / warmup_steps
             loss_val = train_step(images, labels,YOLO,accum_gradient)
-            if global_step.numpy() % args.save_steps==0:
-                YOLO.model.save_weights(args.weight_save_path + '/step_{}'.format(global_step.numpy()))
+            # if global_step.numpy() % args.save_steps==0:
+            #     YOLO.model.save_weights(args.weight_save_path + '/step_{}'.format(global_step.numpy()))
 
         # log print
         time_sofar = (time.time() - start_time) / 3600
@@ -177,21 +174,27 @@ def train(args,hyp):
 
         # validation step
         validation_loss = 0
+        YOLO.gr=1.0
         for val_images, val_labels in val_set:
             validation_loss += test_step(val_images, val_labels,YOLO)
+
+        if args.summary:
+            with writer.as_default():
+                tf.summary.scalar("val_loss", validation_loss*64/args.batch_size/val_len, step=global_step)
 
         # log print
         time_sofar = (time.time() - start_time) / 3600
         training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
         print("=> Epoch:%4d | VAL STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (
-        epoch, global_step.numpy(), validation_loss/val_len, time_sofar, training_time_left))
+        epoch, global_step.numpy(), validation_loss*64/args.batch_size/val_len, time_sofar, training_time_left))
 
         # exit condition
         if global_step.numpy()==total_steps:
             break
 
         # save weight every epochs
-        YOLO.model.save_weights(args.weight_save_path + '/{}'.format(epoch))
+        if epoch>0 and epoch%10==0:
+            YOLO.model.save_weights(args.weight_save_path + '/{}'.format(epoch))
 
     # finish train
     YOLO.model.save_weights(args.weight_save_path+'/final')
@@ -251,9 +254,9 @@ if __name__== '__main__':
            'hsv_h': 0.0138,  # image HSV-Hue augmentation (fraction)
            'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)
            'hsv_v': 0.36,  # image HSV-Value augmentation (fraction)
-           'degrees': 1.98 * 0,  # image rotation (+/- deg)
-           'translate': 0.05 * 0,  # image translation (+/- fraction)
-           'scale': 0.5,  # image scale (+/- gain)
-           'shear': 0.641 * 0}  # image shear (+/- deg)
+           'degrees': 10.0,#1.98 * 0,  # image rotation (+/- deg)
+           'translate': 0.1,#0.05 * 0,  # image translation (+/- fraction)
+           'scale': 0.1,#0.5,  # image scale (+/- gain)
+           'shear': 0.1}#0.641 * 0}  # image shear (+/- deg)
 
     train(args,hyp)
