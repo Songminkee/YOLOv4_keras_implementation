@@ -95,9 +95,10 @@ def train(args,hyp):
     @tf.function
     def train_step(images, labels, YOLO, accum_gradient):
         with tf.GradientTape() as tape:
-            pred = YOLO.model(images)
+            tape.watched_variables()
+            pred = YOLO.model(images, training=True)
             if args.summary:
-                loss_val = YOLO.loss(labels, pred,step = global_step,writer=writer)
+                loss_val = YOLO.loss(labels, pred, step=global_step, writer=writer)
                 with writer.as_default():
                     tf.summary.scalar("learning rate", YOLO.model.optimizer.lr, step=global_step)
                     # if args.summary_variable:
@@ -108,7 +109,7 @@ def train(args,hyp):
 
         # accum gradient
         gradients = tape.gradient(loss_val, YOLO.model.trainable_variables)
-        accum_gradient = [(acum_grad+grad) for acum_grad,grad in zip(accum_gradient,gradients)]
+        accum_gradient = [(acum_grad + grad) for acum_grad, grad in zip(accum_gradient, gradients)]
 
         # summary gradinent histogram
         if args.summary_variable:
@@ -117,7 +118,8 @@ def train(args,hyp):
                     tf.summary.histogram(grad.name, grad, step=global_step)
 
         # apply accum gradient
-        if global_step % accum_steps == 0 or (global_step % steps_per_epoch == 0 and not args.train_by_steps and not args.warmup_by_steps):
+        if global_step % accum_steps == 0 or (
+                global_step % steps_per_epoch == 0 and not args.train_by_steps and not args.warmup_by_steps):
             accum_gradient = [this_grad for this_grad in accum_gradient]
             YOLO.model.optimizer.apply_gradients(zip(accum_gradient, YOLO.model.trainable_variables))
 
@@ -126,13 +128,13 @@ def train(args,hyp):
         if global_step <= warmup_steps:
             lr = global_step / warmup_steps * hyp['lr0']
             moment = global_step / warmup_steps * hyp['momentum']
-            YOLO.model.optimizer.momentum.assign(tf.cast(moment,tf.float32))
+            YOLO.model.optimizer.momentum.assign(tf.cast(moment, tf.float32))
         else:
-            lr = hyp['lrf'] + 0.5 * ( hyp['lr0'] - hyp['lrf']) * (
+            lr = hyp['lrf'] + 0.5 * (hyp['lr0'] - hyp['lrf']) * (
                 (1 + tf.cos((global_step - warmup_steps) / (total_steps - warmup_steps) * np.pi))
             )
         YOLO.model.optimizer.lr.assign(tf.cast(lr, tf.float32))
-        return loss_val
+        return loss_val, accum_gradient
 
     # test_function
     @tf.function
@@ -154,17 +156,19 @@ def train(args,hyp):
         total_epochs = args.warmup_epochs+args.epochs
 
     for epoch in range(total_epochs):
-        # accum gradient init
-        if (global_step.numpy()-1) % accum_steps==0 or (not args.train_by_steps and not args.warmup_by_steps and (global_step.numpy()-1) % steps_per_epoch == 0):
-            accum_gradient = [tf.zeros_like(this_var) for this_var in YOLO.model.trainable_variables]
-            gc.collect()
-
         # train step
         for images, labels in train_set:
             if global_step.numpy() <= warmup_steps:
                 YOLO.gr = global_step.numpy() / warmup_steps
-            loss_val = train_step(images, labels,YOLO,accum_gradient)
-            # if global_step.numpy() % args.save_steps==0:
+            loss_val, accum_gradient = train_step(images, labels, YOLO, accum_gradient)
+
+            # accum gradient init
+            if (global_step.numpy() - 1) % accum_steps == 0 or (
+                    not args.train_by_steps and not args.warmup_by_steps and (
+                    global_step.numpy() - 1) % steps_per_epoch == 0):
+                accum_gradient = [tf.zeros_like(this_var) for this_var in YOLO.model.trainable_variables]
+
+            # if global_step.numpy() % args.save_steps == 0:
             #     YOLO.model.save_weights(args.weight_save_path + '/step_{}'.format(global_step.numpy()))
 
         # log print
@@ -180,13 +184,13 @@ def train(args,hyp):
 
         if args.summary:
             with writer.as_default():
-                tf.summary.scalar("val_loss", validation_loss*64/val_len, step=global_step)
+                tf.summary.scalar("val_loss", validation_loss*64/args.batch_size/val_len, step=global_step)
 
         # log print
         time_sofar = (time.time() - start_time) / 3600
         training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
         print("=> Epoch:%4d | VAL STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (
-        epoch, global_step.numpy(), validation_loss*64/val_len, time_sofar, training_time_left))
+        epoch, global_step.numpy(), validation_loss*64/args.batch_size/val_len, time_sofar, training_time_left))
 
         # exit condition
         if global_step.numpy()==total_steps:

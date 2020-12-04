@@ -122,7 +122,7 @@ class YOLOv4(object):
             l_iou = tf.reduce_sum(tf.where(mask, 1 - iou, 0)) / (mask_num + 1e-16)
             l_obj = tf.reduce_sum(tf.where(mask, l_obj, 0)) / (mask_num + 1e-16)
             l_noobj = tf.expand_dims(bce(0, all_conf), -1)
-            l_noobj = (tf.reduce_sum(l_noobj) - tf.reduce_sum(tf.where(is_label, tf.gather_nd(l_noobj, idx), 0))) / (tf.cast(self.batch_size*tf.shape(out[i])[1]**2,tf.float32)-mask_num)
+            l_noobj = (tf.reduce_sum(l_noobj) - tf.reduce_sum(tf.where(is_label, tf.gather_nd(l_noobj, idx), 0))) / (tf.cast(self.batch_size*tf.shape(out[i])[1]**2*3,tf.float32)-mask_num)
 
             # get class_loss
             if self.num_classes>1:
@@ -261,7 +261,7 @@ class YOLOv4_tiny(object):
             l_iou = tf.reduce_sum(tf.where(mask, 1 - iou, 0)) / (mask_num + 1e-16)
             l_obj = tf.reduce_sum(tf.where(mask, l_obj, 0)) / (mask_num + 1e-16)
             l_noobj = tf.expand_dims(bce(0, all_conf), -1)
-            l_noobj = (tf.reduce_sum(l_noobj) - tf.reduce_sum(tf.where(is_label, tf.gather_nd(l_noobj, idx), 0))) / (tf.cast(self.batch_size*tf.shape(out[i])[1]**2,tf.float32)-mask_num)
+            l_noobj = (tf.reduce_sum(l_noobj) - tf.reduce_sum(tf.where(is_label, tf.gather_nd(l_noobj, idx), 0))) / (tf.cast(self.batch_size*tf.shape(out[i])[1]**2*3,tf.float32)-mask_num)
 
             # get class_loss
             if self.num_classes > 1:
