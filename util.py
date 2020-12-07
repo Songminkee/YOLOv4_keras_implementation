@@ -143,7 +143,7 @@ def get_iou_loss(pred,label,method='GIoU'):
     p_x1, p_x2 = px - pw / 2.0, px + pw / 2.0
     p_y1, p_y2 = py - ph / 2.0, py + ph / 2.0
     l_x1, l_x2 = lx - lw / 2.0, lx + lw / 2.0
-    l_y1, l_y2 = lw - lh / 2.0, lw + lh / 2.0
+    l_y1, l_y2 = ly - lh / 2.0, ly + lh / 2.0
 
     con_x1 = tf.concat([p_x1, l_x1], -1)
     con_x2 = tf.concat([p_x2, l_x2], -1)
