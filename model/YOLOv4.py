@@ -22,6 +22,7 @@ class YOLOv4(object):
         self.gr = 0.02
         self.hyp = hyp
         self.batch_size = args.batch_size
+        self.update_batch = args.update_batch
         self.soft = args.soft
         self.anchors = make_anchor(self.stride,self.anchor)
         self.num_classes = args.num_classes
@@ -94,45 +95,64 @@ class YOLOv4(object):
 
     def loss(self,box_label,out,step=None,writer=None):
         bce = tf.keras.losses.BinaryCrossentropy(False, reduction=tf.keras.losses.Reduction.NONE)
-        cp,cn = smoothing_value(self.num_classes,self.soft)
+        cp, cn = smoothing_value(self.num_classes, self.soft)
         iou_loss, object_loss, class_loss = 0, 0, 0
+
+        label = [box_label * label_scaler(out[i]) for i in range(3)]
+        is_best = get_best_match_anchor(label, self.anchors)
         for i in range(3):
-            scaler = tf.stop_gradient(label_scaler(out[i]))
-            label = box_label*scaler
-            mask,idx,label,is_label = build_target(self.anchors[i],label,self.hyp)
+            # scaler = label_scaler(out[i])
+            # label = box_label*scaler
+            mask, idx, overlap_label = build_overlap_target(self.anchors[i], label[i], self.hyp, out[i], is_best[i])
 
-            c_label, box = tf.split(label,[1,4],-1)
+            _, box = tf.split(label[i], [1, 4], -1)
+            c_label, overlap_box = tf.split(overlap_label, [1, 4], -1)
 
-            pred = tf.gather_nd(out[i],idx)
+            pred = tf.gather_nd(out[i], idx)
 
-            if self.num_classes>1:
-                xywh,conf,cls = tf.split(pred,[4,1,self.num_classes],-1)
-                _, all_conf, _ = tf.split(out[i], [4, 1, self.num_classes], -1)
+            if self.num_classes > 1:
+                xywh, conf, cls = tf.split(pred, [4, 1, self.num_classes], -1)
+                all_xywh, all_conf, _ = tf.split(out[i], [4, 1, self.num_classes], -1)
             else:
                 xywh, conf = tf.split(pred, [4, 1], -1)
-                _, all_conf = tf.split(out[i], [4, 1], -1)
+                all_xywh, all_conf = tf.split(out[i], [4, 1], -1)
 
             # get giou or ciou or diou
-            iou = tf.clip_by_value(get_iou_loss(xywh,box),0.0,1.0) # [b,max_label,3,1]
+            iou = tf.clip_by_value(get_iou_loss(xywh, overlap_box,method='CIoU'), 0.0, 1.0)  # [b,max_label,3,1]
+            # iou = get_iou_loss(xywh,overlap_box)
 
-            # get obj(confidence) loss by iou
-            l_obj = tf.expand_dims(bce((1.0-self.gr) + self.gr*iou, conf),-1) # [b,max_label,3,1]
+            # get obj(confidence) loss by iou per label
+            # l_obj = tf.expand_dims(bce(1.0, conf),-1)
+            #l_obj = tf.expand_dims(bce((1.0-self.gr) + self.gr*iou, conf),-1) # [b,max_label,3,1]
+            l_obj = tf.expand_dims(bce(1.0, conf), -1)
 
+            # cal losses for best_match per label
             mask_num = tf.reduce_sum(tf.cast(mask, tf.float32))
             l_iou = tf.reduce_sum(tf.where(mask, 1 - iou, 0)) / (mask_num + 1e-16)
             l_obj = tf.reduce_sum(tf.where(mask, l_obj, 0)) / (mask_num + 1e-16)
-            l_noobj = tf.expand_dims(bce(0, all_conf), -1)
-            l_noobj = (tf.reduce_sum(l_noobj) - tf.reduce_sum(tf.where(is_label, tf.gather_nd(l_noobj, idx), 0))) / (tf.cast(self.batch_size*tf.shape(out[i])[1]**2*3,tf.float32)-mask_num)
+
+            # get mask where normal iou > 0.7
+            threshold_mask, best_iou = get_threshold_mask(all_xywh, box, self.hyp['ignore_threshold'])
+
+            # cal bce loss (no obj and where normal_iou>0.7)
+            # l_noobj = tf.expand_dims(tf.where(threshold_mask,bce(1.0, all_conf),bce(0, all_conf)), -1)
+
+            # l_noobj = tf.expand_dims(tf.where(threshold_mask,bce((1.0-self.gr) + self.gr*best_iou, all_conf),bce(0, all_conf)), -1)
+            l_noobj = tf.expand_dims(tf.where(threshold_mask, 0., bce(0., all_conf)), -1)
+            #l_noobj = tf.expand_dims(bce(0., all_conf), -1)
+            l_noobj = (tf.reduce_sum(l_noobj) - tf.reduce_sum(tf.where(mask, tf.gather_nd(l_noobj, idx), 0.))) / (
+                        tf.cast(self.batch_size * (tf.shape(out[i])[1] ** 2) * 3, tf.float32) - mask_num + 1e-16)
 
             # get class_loss
-            if self.num_classes>1:
-                c_label = tf.one_hot(tf.cast(tf.squeeze(c_label),tf.int32), self.num_classes, on_value=cp, off_value=cn)
-                l_cls = tf.expand_dims(bce(c_label,cls),-1) # [b,max_label,3,1]
-                l_cls = tf.reduce_sum(tf.where(mask,l_cls,0))/(mask_num+1e-16)
+            if self.num_classes > 1:
+                c_label = tf.one_hot(tf.cast(tf.squeeze(c_label), tf.int32), self.num_classes, on_value=cp,
+                                     off_value=cn)
+                l_cls = tf.expand_dims(bce(c_label, cls), -1)  # [b,max_label,3,1]
+                l_cls = tf.reduce_sum(tf.where(mask, l_cls, 0)) / (mask_num + 1e-16)
                 class_loss += l_cls
 
             iou_loss += l_iou
-            object_loss += l_obj+l_noobj
+            object_loss += l_obj + l_noobj
 
             if writer != None:
                 with writer.as_default():
@@ -142,7 +162,7 @@ class YOLOv4(object):
                         tf.summary.scalar("l_cls_{}".format(i), l_cls, step=step)
 
         if self.num_classes > 1:
-            loss = iou_loss*self.hyp['giou'] + object_loss * self.hyp['obj'] + class_loss * self.hyp['cls']
+            loss = iou_loss * self.hyp['giou'] + object_loss * self.hyp['obj'] + class_loss * self.hyp['cls']
         else:
             loss = iou_loss * self.hyp['giou'] + object_loss * self.hyp['obj']
 
@@ -151,10 +171,10 @@ class YOLOv4(object):
                 tf.summary.scalar("iou_loss", iou_loss, step=step)
                 tf.summary.scalar("object_loss", object_loss, step=step)
                 if self.num_classes > 1:
-                   tf.summary.scalar("class_loss", class_loss, step=step)
-                tf.summary.scalar("loss",loss,step=step)
+                    tf.summary.scalar("class_loss", class_loss, step=step)
+                tf.summary.scalar("loss", loss, step=step)
 
-        return loss *self.batch_size/ 64
+        return loss * self.batch_size / self.update_batch
 
 
 class YOLOv4_tiny(object):

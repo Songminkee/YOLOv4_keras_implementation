@@ -22,9 +22,9 @@ def train(args,hyp):
     train_set = loader.DataLoader(args, hyp, 'train')
     val_set = loader.DataLoader(args, hyp, 'val')
     val_len =int(np.ceil(len(val_set) / args.batch_size))
-    accum_steps = max(round(64 / args.batch_size), 1)
+    accum_steps = max(round(args.update_batch / args.batch_size), 1)
     global_step = tf.Variable(1, trainable=False, dtype=tf.int64)
-
+    best_loss = 9999999
     # print train info
     print('-' * 10)
     print('batch_size : {}'.format(args.batch_size))
@@ -33,7 +33,7 @@ def train(args,hyp):
     if args.train_by_steps:
         print('warmup by steps : {}'.format(args.warmup_by_steps))
         if args.warmup_by_steps:
-            warmup_steps = int(np.ceil(args.warmup_steps * 64 /args.batch_size))
+            warmup_steps = int(np.ceil(args.warmup_steps * args.update_batch /args.batch_size))
         else:
             warmup_steps = args.warmup_epochs * steps_per_epoch
             print('warmup epochs : {}'.format(args.warmup_epochs))
@@ -41,11 +41,11 @@ def train(args,hyp):
             warmup_steps = 1
         print('warmup steps : {}'.format(warmup_steps))
         print('train by steps : {}'.format(args.train_by_steps))
-        total_steps = int(np.ceil(args.train_steps * 64 /args.batch_size))+warmup_steps
+        total_steps = int(np.ceil(args.train_steps * args.update_batch /args.batch_size))+warmup_steps
     else:
         print('warmup by steps : {}'.format(args.warmup_by_steps))
         if args.warmup_by_steps:
-            warmup_steps = int(np.ceil(args.warmup_steps * 64 /args.batch_size))
+            warmup_steps = int(np.ceil(args.warmup_steps * args.update_batch /args.batch_size))
         else:
             warmup_steps = args.warmup_epochs * steps_per_epoch
             print('warmup epochs : {}'.format(args.warmup_epochs))
@@ -139,7 +139,7 @@ def train(args,hyp):
     # test_function
     @tf.function
     def test_step(images, labels,YOLO):
-        pred = YOLO.model(images)
+        pred = YOLO.model(images,training=False)
         loss_val = YOLO.loss(labels, pred)
         return loss_val
 
@@ -184,21 +184,26 @@ def train(args,hyp):
 
         if args.summary:
             with writer.as_default():
-                tf.summary.scalar("val_loss", validation_loss*64/args.batch_size/val_len, step=global_step)
+                tf.summary.scalar("val_loss", validation_loss*args.update_batch/args.batch_size/val_len, step=global_step)
 
         # log print
         time_sofar = (time.time() - start_time) / 3600
         training_time_left = (total_steps / global_step.numpy() - 1.0) * time_sofar
         print("=> Epoch:%4d | VAL STEP %4d | loss_val: %4.2f | time elapsed: %4.2f h | time left: %4.2f h " % (
-        epoch, global_step.numpy(), validation_loss*64/args.batch_size/val_len, time_sofar, training_time_left))
+        epoch, global_step.numpy(), validation_loss*args.update_batch/args.batch_size/val_len, time_sofar, training_time_left))
 
         # exit condition
         if global_step.numpy()==total_steps:
             break
 
-        # save weight every epochs
+        # save weight
         if epoch>0 and epoch%10==0:
             YOLO.model.save_weights(args.weight_save_path + '/{}'.format(epoch))
+
+        # save best model
+        if best_loss> validation_loss:
+            best_loss = validation_loss
+            YOLO.model.save_weights(args.weight_save_path + '/best')
 
     # finish train
     YOLO.model.save_weights(args.weight_save_path+'/final')
@@ -208,7 +213,9 @@ if __name__== '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='YOLOv4 implementation.')
-    parser.add_argument('--batch_size', type=int, help = 'Size of batch size. (But, The gradient update is performed every 64/batch size.) / default : 4 / 64 (YOLO v4/ YOLOv4 tiny)',
+    parser.add_argument('--update_batch', type=int, help='Size of update batch size. ',
+                        default=64)
+    parser.add_argument('--batch_size', type=int, help = 'Size of batch size. (But, The gradient update is performed every update_batch/batch size.) / default : 4 / update_batch (YOLO v4/ YOLOv4 tiny)',
                         default=64)
     parser.add_argument('--img_size',              type=int,   help='Size of input image. / default : 416', default=416)
     parser.add_argument('--data_root',              type=str,   help='Root path of class name file and coco_%2017.txt / default : "./data"'
@@ -222,10 +229,10 @@ if __name__== '__main__':
     parser.add_argument('--mosaic', action='store_false', help='Flag of mosaic augmentation / default : true')
     parser.add_argument('--is_shuffle', action='store_false', help='Flag of data shuffle / default : true')
     parser.add_argument('--train_by_steps',action='store_true', help = 'Flag for whether to proceed with the training by step or epoch. / default : false')
-    parser.add_argument('--train_steps', type=int, default=500500, help ='This is the total iteration to be carried out based on 64 batches. So the total steps will be train_steps * 64 / batch_size. Used only when the train_by_steps flag is true.  / default : 500500')
+    parser.add_argument('--train_steps', type=int, default=500500, help ='This is the total iteration to be carried out based on update_batch batches. So the total steps will be train_steps * update_batch / batch_size. Used only when the train_by_steps flag is true.  / default : 500500')
     parser.add_argument('--epochs', type=int,default=300 , help ='Total epochs to be trained. Used only when the train_by_steps flag is false. / default : 300')
     parser.add_argument('--warmup_by_steps', action='store_true', help ='Flag for whether to proceed with the warm up by step or epoch. / default : false')
-    parser.add_argument('--warmup_steps', type = int, default=1000, help = 'This is the total iteration of warm up to be carried out based on 64 batches. So the steps will be warm up_steps * 64 / batch_size. Used only when the warmup_by_steps flag is true. / default : 1000')
+    parser.add_argument('--warmup_steps', type = int, default=1000, help = 'This is the total iteration of warm up to be carried out based on update_batch batches. So the steps will be warm up_steps * update_batch / batch_size. Used only when the warmup_by_steps flag is true. / default : 1000')
     parser.add_argument('--warmup_epochs', type=int, default=3, help ='Total epochs to warm up. Used only when the warmup_by_steps flag is false. / default : 3')
     parser.add_argument('--save_steps', type=int, default=1000, help ='Step cycle to store weight. /default : 1000')
     parser.add_argument('--is_darknet_weight', action='store_true',
@@ -236,7 +243,7 @@ if __name__== '__main__':
     parser.add_argument('--soft',type=float,default=0.0, help = 'This is a value for soft labeling, and soft/num_class becomes the label for negative class. / default : 0.0' )
     parser.add_argument('--log_path', type=str, default='./log/tiny', help = 'logdir path for Tensorboard')
     parser.add_argument('--summary', action='store_false')
-    parser.add_argument('--summary_variable', action='store_false')
+    parser.add_argument('--summary_variable', action='store_true')
     parser.add_argument('--weight_path',type=str,default='',help = 'Path of weight file / default : ""')
     parser.add_argument('--weight_save_path', type=str, default='./weight',help = 'Path to store weights. / default : "./wegiht"')
     parser.add_argument('--mode',
@@ -258,9 +265,10 @@ if __name__== '__main__':
            'hsv_h': 0.0138,  # image HSV-Hue augmentation (fraction)
            'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)
            'hsv_v': 0.36,  # image HSV-Value augmentation (fraction)
-           'degrees': 10.0,#1.98 * 0,  # image rotation (+/- deg)
-           'translate': 0.1,#0.05 * 0,  # image translation (+/- fraction)
-           'scale': 0.1,#0.5,  # image scale (+/- gain)
-           'shear': 0.1}#0.641 * 0}  # image shear (+/- deg)
-
+           'degrees': 1.98,#10.0,#1.98 * 0,  # image rotation (+/- deg)
+           'translate':0.3, #0.1,#0.05 * 0,  # image translation (+/- fraction)
+           'scale':0.3, #0.1,#0.5,  # image scale (+/- gain)
+           'shear':0,# 0.1,#0.641 * 0}  # image shear (+/- deg)
+           'ignore_threshold': 0.7
+           }
     train(args,hyp)

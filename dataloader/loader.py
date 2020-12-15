@@ -24,16 +24,23 @@ class DataLoader(tf.keras.utils.Sequence):
 
         self.indices = np.arange(len(self.images_path))
         self.is_padding = is_padding
+        self.on_epoch_end()
 
-
-    def load_image(self,index):
-        img = cv2.imread(self.images_path[index])
+    def load_image(self, index):
+        raw_image = tf.io.read_file(self.images_path[index])
+        try:
+            img = tf.io.decode_image(raw_image, 3)
+        except:
+            img = tf.io.decode_image(raw_image, 1)
+        if img.shape[-1] == 1:
+            img = tf.image.grayscale_to_rgb(img)
         h0, w0 = img.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # resize image to img_size
         if r < 1 or (self.augment and r != 1):  # always resize down, only resize up if training with augmentation
-            interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
-            img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
-        return img, (h0, w0), img.shape[:2]
+            interp = tf.image.ResizeMethod.AREA if r < 1 and not self.augment else tf.image.ResizeMethod.BILINEAR
+            img = tf.cast(tf.image.resize(img, [int(h0 * r), int(w0 * r)], interp),tf.uint8)
+
+        return img.numpy(), (h0, w0), img.shape[:2]
 
     def load_label(self,index):
         if self.num_classes>1:
@@ -282,6 +289,10 @@ class DataLoader(tf.keras.utils.Sequence):
         img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
         label_out = np.zeros([self.max_label,5])
         label_out[:label.shape[0]]=label
+
+        if np.sum(label_out[:, 1:]) == 0.:
+            return self.__getitem__(index)
+
         if now_index==len(self)-1:
             self.on_epoch_end()
         return img/255.0,label_out

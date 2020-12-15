@@ -126,17 +126,44 @@ def label_scaler(out):
 def get_idx(label):
     b,max_label,_ = label.shape
     _,gx,gy,_ = tf.split(label,[1,1,1,2],-1)
-    return tf.concat([tf.tile(tf.reshape(tf.range(0,b),[-1,1,1]),[1,max_label,1]),tf.cast(tf.floor(gy),tf.int32),tf.cast(tf.floor(gx),tf.int32)],-1)
+    return tf.concat([tf.tile(tf.reshape(tf.range(0,b),[-1,1,1]),[1,max_label,1]),tf.cast(gy,tf.int32),tf.cast(gx,tf.int32)],-1)
 
-def build_target(anchor,label,hyp):
+def build_overlap_target(anchor, label,hyp,out,is_best):
+    '''
+    Build target with overlapped coordinate
+    out : [b,grid,grid,3,(5+num_classes)]
+    is_best : [b,max_label,3,1] -> [b,max_label*3,5]
+    anchor : [3,2]
+    label : [b,max_label,5] -> [b,max_label*3,5]
+    '''
+    _, max_y, max_x, _, _ = out.shape
+    c, x, y, wh = tf.split(label, [1, 1, 1, 2], -1)
+    x_n = tf.where(tf.math.mod(x, 1.) > 0.5, x + 1, x - 1)
+    x_n = tf.where(tf.logical_and(x_n >= 0, x_n < max_x), tf.concat([c, x_n, y, wh], -1), 0)
+
+    y_n = tf.where(tf.math.mod(y, 1.) > 0.5, y + 1, y - 1)
+    y_n = tf.where(tf.logical_and(y_n >= 0, y_n < max_y), tf.concat([c, x, y_n, wh], -1), 0)
+
+    label = tf.concat([label, x_n, y_n], 1)
+    return build_target(anchor,label,hyp,tf.tile(is_best,[1,3,1,1]))
+
+
+def build_target(anchor,label,hyp,is_best):
+    '''
+    is_best : [b,max_label,3,1]
+    anchor : [3,2]
+    label : [b,max_label,5]
+    '''
     iou = wh_iou(anchor, label[..., 3:])  # [b,max_label,3,1] 각 anchor 별 label과 iou
-    mask = iou > hyp['iou_t']
     idx = get_idx(label)
     label = tf.tile(tf.expand_dims(label,2),[1,1,3,1])
     is_label = tf.reduce_sum(label, -1, keepdims=True) != 0
-    return tf.stop_gradient(mask),tf.stop_gradient(idx),tf.stop_gradient(label),is_label
+    mask = tf.logical_and(is_label,tf.logical_or(iou> hyp['iou_t'],is_best))
+    return mask,idx,label
 
-def get_iou_loss(pred,label,method='GIoU'):
+
+def get_iou_loss(pred, label, method='GIoU'):
+    nonan = tf.compat.v1.div_no_nan
     px, py, pw, ph = tf.split(pred, [1, 1, 1, 1], -1)
     lx, ly, lw, lh = tf.split(label, [1, 1, 1, 1], -1)
 
@@ -150,32 +177,55 @@ def get_iou_loss(pred,label,method='GIoU'):
     con_y1 = tf.concat([p_y1, l_y1], -1)
     con_y2 = tf.concat([p_y2, l_y2], -1)
 
-    inter = tf.expand_dims((tf.reduce_min(con_x2,-1) - tf.reduce_max(con_x1,-1)) * \
-            (tf.reduce_min(con_y2, -1) - tf.reduce_max(con_y1, -1)),-1)
+    max_x1 = tf.reduce_max(con_x1, -1)
+    min_x2 = tf.reduce_min(con_x2, -1)
 
-    union = (pw * ph + 1e-16) + lw*lh - inter
-    iou = inter/union
+    max_y1 = tf.reduce_max(con_y1, -1)
+    min_y2 = tf.reduce_min(con_y2, -1)
 
-    cw = tf.reduce_max(con_x2,-1,keepdims=True) - tf.reduce_min(con_x1,-1,keepdims=True)
-    ch = tf.reduce_max(con_y2,-1,keepdims=True) - tf.reduce_min(con_y1,-1,keepdims=True)
+    inter = tf.expand_dims((min_x2 - max_x1) * (min_y2 - max_y1), -1)
 
-    if method=='GIoU':
-        c_area = cw * ch + 1e-16
-        return iou - (c_area - union) / c_area
-    elif method=='DIoU' or method=='CIoU':
-        c2 = cw**2 + ch**2 +1e-16
-        rho2 = ((l_x1+l_x2) - (p_x1 + p_x2)) ** 2 / 4 + ((l_y1+l_y2) - (p_y1+p_y2)) ** 2 / 4
-        if method=='DIoU':
-            return iou-rho2/c2
-        else:
-            v = (4 / math.pi**2) * (tf.math.atan((l_x2-l_x1)/(l_y2-l_y1)) - tf.math.atan((p_x2-p_x1)/(p_y2-p_y1))**2)
-            alpha = tf.stop_gradient(iou / (1-iou+v))
-            return iou - (rho2 / c2 + v * alpha)
-    else:
+    union = pw * ph + lw * lh - inter
+    iou = nonan(inter, union)
+
+    # where non overlapped
+    iou = tf.where(tf.expand_dims(tf.logical_and(min_y2 > max_y1, min_x2 > max_x1), -1), iou, 0.)
+
+    if method == 'IoU':
         return iou
+
+    cw = tf.reduce_max(con_x2, -1, keepdims=True) - tf.reduce_min(con_x1, -1, keepdims=True)
+    ch = tf.reduce_max(con_y2, -1, keepdims=True) - tf.reduce_min(con_y1, -1, keepdims=True)
+
+    if method == 'GIoU':
+        c_area = cw * ch
+        return iou - nonan((c_area - union), c_area)
+    elif method == 'DIoU' or method == 'CIoU':
+        c2 = cw ** 2 + ch ** 2
+        rho2 = (lx - px) ** 2 + (ly - py) ** 2
+        if method == 'DIoU':
+            return iou - nonan(rho2, c2)
+        else:
+            v = (4 / ((math.pi) ** 2)) * ((tf.math.atan2(pw, ph) - tf.math.atan2(lw, lh)) ** 2)
+            alpha = nonan(v, 1 - iou + v)
+            return iou - (nonan(rho2, c2) + v * alpha)
 
 def smoothing_value(classes,eps=0.0):
     return (1.0-eps),eps/classes
+
+def get_threshold_mask(pred,label,ignore_threshold=0.7):
+    pred = tf.tile(tf.expand_dims(pred, -2), [1, 1, 1, 1, tf.shape(label)[1], 1])
+    label = tf.tile(tf.reshape(label, [tf.shape(pred)[0], 1, 1, 1, -1, 4]),
+                    [1, tf.shape(pred)[1], tf.shape(pred)[1], 3, 1, 1])
+    ious = tf.clip_by_value(get_iou_loss(pred, label, 'IoU'), 0.0, 1.0)
+    best_iou = tf.reduce_max(tf.where(tf.reduce_sum(label, axis=-1, keepdims=True) > 0., ious, 0.), 4)
+    return tf.squeeze(best_iou > ignore_threshold), best_iou
+
+def get_best_match_anchor(label,anchors):
+    ious = [wh_iou(anchors[i], label[i][..., 3:]) for i in range(len(anchors))]
+    ious = tf.concat(ious, 2) # [b, max_label, anchors*3, 1]
+    best = tf.logical_and(ious == tf.reduce_max(ious,2,keepdims=True),ious>0.)
+    return list(tf.split(best,[len(anchors) for _ in range(len(anchors))],axis=2)) # [b, max_label, 3, 1] x anchors
 
 # https://github.com/hunglc007/tensorflow-yolov4-tflite
 def load_darknet_weights(model, weights_file, is_tiny=False,include_top=True):
@@ -212,7 +262,11 @@ def load_darknet_weights(model, weights_file, is_tiny=False,include_top=True):
             bn_layer = model.get_layer(bn_layer_name)
             j += 1
         else:
-            conv_bias = np.fromfile(wf, dtype=np.float32, count=filters)
+            try:
+                conv_bias = np.fromfile(wf, dtype=np.float32, count=filters)
+            except:
+                pass
+
 
         # darknet shape (out_dim, in_dim, height, width)
         conv_shape = (filters, in_dim, k_size, k_size)
