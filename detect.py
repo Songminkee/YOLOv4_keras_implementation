@@ -11,7 +11,7 @@ import cv2
 
 def detect(image,YOLO,class_name,args):
     image = np.squeeze(image)
-    img = image.copy()
+    img = image.copy() / 255.0
     h, w, _ = img.shape
     if h != args.img_size or w != args.img_size:
         img = cv2.resize(img,(args.img_size,args.img_size))
@@ -39,6 +39,7 @@ def detect(image,YOLO,class_name,args):
         image = cv2.rectangle(image, (x_min[i],y_min[i]), (np.float32(t[0]), np.float32(t[1])), box_color, -1)  # filled
         image = cv2.putText(image, bbox_mess, (int(x_min[i]), int(y_min[i] - 2)), cv2.FONT_HERSHEY_SIMPLEX,
                     fontScale, (0, 0, 0), bbox_thick // 2, lineType=cv2.LINE_AA)
+
     return image
 
 def detect_example(args,hyp):
@@ -60,10 +61,10 @@ def detect_example(args,hyp):
             YOLO.model.load_weights(args.weight_path)
 
     class_name = load_class_name(args.data_root, args.class_file)
-    image_pathes = glob.glob(os.path.join(args.input_dir,'*'))
+    image_pathes = glob.glob(os.path.join(args.input_dir,'*.jpg'))
 
     for im_path in image_pathes:
-        img = cv2.cvtColor(cv2.imread(im_path),cv2.COLOR_BGR2RGB)/255.0
+        img = cv2.cvtColor(cv2.imread(im_path),cv2.COLOR_BGR2RGB)
         img = cv2.cvtColor(detect(img,YOLO,class_name,args),cv2.COLOR_RGB2BGR)
         cv2.imshow('detected',img)
         cv2.waitKey()
@@ -83,8 +84,11 @@ if __name__== '__main__':
     parser.add_argument('--is_tiny', action='store_true', help = 'Flag for using tiny. / default : false')
     parser.add_argument('--input_dir',type=str,default='./data/dataset/box_dataset/images/val')
     parser.add_argument('--confidence_threshold', type=float, default=0.001)
-    parser.add_argument('--iou_threshold', type=float, default=0.6)
-    parser.add_argument('--score_threshold', type=float, default=0.6)
+    parser.add_argument('--iou_threshold', type=float, default=0.1)
+    parser.add_argument('--score_threshold', type=float, default=0.1)
+    parser.add_argument('--data_name', type=str,
+                        help='Root path of class name file and coco_%2017.txt / default : "./data"'
+                        , default='coco')
     args = parser.parse_args()
 
     args.mode='eval'

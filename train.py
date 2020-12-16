@@ -163,9 +163,9 @@ def train(args,hyp):
             loss_val, accum_gradient = train_step(images, labels, YOLO, accum_gradient)
 
             # accum gradient init
-            if (global_step.numpy() - 1) % accum_steps == 0 or (
+            if (global_step.numpy()) % accum_steps == 0 or (
                     not args.train_by_steps and not args.warmup_by_steps and (
-                    global_step.numpy() - 1) % steps_per_epoch == 0):
+                    global_step.numpy()) % steps_per_epoch == 0):
                 accum_gradient = [tf.zeros_like(this_var) for this_var in YOLO.model.trainable_variables]
 
             # if global_step.numpy() % args.save_steps == 0:

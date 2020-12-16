@@ -291,11 +291,14 @@ def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
 
 def merge_info(box,classes,stride):
     batch = tf.shape(box)[0]
-    if classes>1:
-        xy,wh, conf, cls = tf.split(box, [2,2,1, classes], -1)
-        cls_conf = conf * cls
-    else:
-        xy, wh, cls_conf = tf.split(box, [2, 2, 1], -1)
+    # if classes>1:
+    #     xy,wh, conf, cls = tf.split(box, [2,2,1, classes], -1)
+    #     cls_conf = conf * cls
+    # else:
+    #     xy, wh, cls_conf = tf.split(box, [2, 2, 1], -1)
+    xy,wh, conf, cls = tf.split(box, [2,2,1, classes], -1)
+    cls_conf = conf * cls
+
     xywh = tf.concat([xy,wh],-1)*stride
 
     xywh = tf.reshape(xywh,[batch,-1,4])

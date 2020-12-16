@@ -246,7 +246,7 @@ class DataLoader(tf.keras.utils.Sequence):
                 img,(h0,w0),(h,w) = self.load_image(index)
                 img, ratio, pad = self.letterbox(img, self.img_size, scaleup=self.augment and self.mode =='train')
                 if self.mode=='eval':
-                    id = int(self.images_path[index].split('/')[-1].split('.')[0])
+                    id = self.images_path[index].split('/')[-1].split('.')[0]
                     return np.expand_dims(cv2.cvtColor(img, cv2.COLOR_BGR2RGB) / 255.0, 0), id, pad, (
                     h0, w0), ratio, label
                 label = self.label_padding(label, ratio, pad, h, w)
@@ -255,7 +255,7 @@ class DataLoader(tf.keras.utils.Sequence):
                     img = cv2.imread(self.images_path[index])
                     h0,w0,_ =img.shape
                     img = cv2.resize(np.copy(img), (self.img_size, self.img_size))
-                    id = int(self.images_path[index].split('/')[-1].split('.')[0])
+                    id = self.images_path[index].split('/')[-1].split('.')[0]
                     return np.expand_dims(cv2.cvtColor(img,cv2.COLOR_BGR2RGB) / 255.0,0),id,None,(h0, w0),None,label
 
         if self.augment:

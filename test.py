@@ -25,7 +25,7 @@ def test_coco(args,hyp,test_set):
             load_darknet_weights(YOLO.model,args.weight_path,args.is_tiny)
         else:
             print('load_model from {}'.format(args.weight_path))
-            YOLO.model.load_weights(args.weight_path)
+            YOLO.model.load_weights(args.weight_path).expect_partial()
 
     names = test_set.classes
     json_list = []
@@ -48,7 +48,7 @@ def test_coco(args,hyp,test_set):
         ious = get_iou(n_box, label[:, 1:])
 
         for i in range(valid_detections[0].numpy()):
-            json_list.append({'image_id': id,
+            json_list.append({'image_id': int(id),
                               'category_id': yolo2coco[int(classes[0][i])],
                               'bbox': [float(round(b.numpy(), 3)) for b in
                                        [x_min[i][0], y_min[i][0], x_max[i][0] - x_min[i][0],
@@ -109,13 +109,13 @@ def test(args,hyp,test_set):
             load_darknet_weights(YOLO.model, args.weight_path, args.is_tiny)
         else:
             print('load_model from {}'.format(args.weight_path))
-            YOLO.model.load_weights(args.weight_path)
+            YOLO.model.load_weights(args.weight_path).expect_partial()
 
     names = test_set.classes
     result = []
     cnt = 0
 
-    for img, id, pad, (h0, w0), ratio, label in test_set:
+    for img, _, pad, (h0, w0), ratio, label in test_set:
         h, w, _ = img[0].shape
 
         boxes, scores, classes, valid_detections = inference(YOLO, img, args)
@@ -183,6 +183,9 @@ if __name__== '__main__':
     parser.add_argument('--data_root',              type=str,   help='Root path of class name file and coco_%2017.txt / default : "./data"', default='./data')
     parser.add_argument('--class_file',              type=str,   help='Class name file / default : "coco.name"', default='coco.names')
     parser.add_argument('--num_classes', type=int, help='Number of classes (in COCO 80) ', default=80)
+    parser.add_argument('--data_name', type=str,
+                        help='Root path of class name file and coco_%2017.txt / default : "./data"'
+                        , default='coco')
     parser.add_argument('--augment',              action='store_true',   help='Flag of augmentation (hsv, flip, random affine) / default : false')
     parser.add_argument('--mosaic', action='store_true', help='Flag of mosaic augmentation / default : false')
     parser.add_argument('--is_shuffle', action='store_false', help='Flag of data shuffle / default : true')
@@ -193,7 +196,7 @@ if __name__== '__main__':
     parser.add_argument('--annotation_path', type=str, default='./data/dataset/COCO/annotations',help= 'COCO annotation file folder / default : "./data/dataset/COCO/annotations"')
     parser.add_argument('--is_darknet_weight', action='store_false', help = 'If true, load the weight file used by the darknet framework.')
     parser.add_argument('--is_tiny', action='store_true', help = 'Flag for using tiny. / default : false')
-    parser.add_argument('--is_coco', action='store_false', help='Flag for coco dataset. / default : true')
+    parser.add_argument('--is_coco', action='store_true', help='Flag for coco dataset. / default : true')
     parser.add_argument('--is_padding', action='store_true', help = ' If true, padding is performed to maintain the ratio of the input image. / default : false')
     parser.add_argument('--confidence_threshold', type=float, default=0.001)
     parser.add_argument('--iou_threshold', type=float, default=0.6)

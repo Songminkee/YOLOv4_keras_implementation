@@ -22,8 +22,9 @@ class YOLOv4(object):
         self.gr = 0.02
         self.hyp = hyp
         self.batch_size = args.batch_size
-        self.update_batch = args.update_batch
-        self.soft = args.soft
+        if args.mode=='train':
+            self.update_batch = args.update_batch
+            self.soft = args.soft
         self.anchors = make_anchor(self.stride,self.anchor)
         self.num_classes = args.num_classes
         self.backbone = CSPDarkNet53.CSPDarkNet53(args).model
@@ -44,14 +45,14 @@ class YOLOv4(object):
         x = tf.concat([conv2d(r3, 128, 1, activation='leaky'),x], -1)
         route2 = convset(x, 128)
         box1 = conv2d(route2, 256, 3, activation='leaky')
-        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) if self.num_classes>1 else 3*5, 1,
+        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,#if self.num_classes>1 else 3*5, 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01))(box1)
 
         x = tf.concat([conv2d(route2, 256, 3, 2, activation='leaky'),route1], -1)
         route3 = convset(x, 256)
         box2 = conv2d(route3, 512, 3, activation='leaky')
-        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) if self.num_classes>1 else 3*5, 1,
+        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,#if self.num_classes>1 else 3*5, 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box2)
@@ -59,7 +60,7 @@ class YOLOv4(object):
         x = tf.concat([ conv2d(route3, 512, 3, 2, activation='leaky'),r1], -1)
         x = convset(x, 512)
         box3 = conv2d(x, 1024, 3, activation='leaky')
-        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) if self.num_classes>1 else 3*5, 1,
+        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,#if self.num_classes>1 else 3*5, 1,
                                       kernel_regularizer=tf.keras.regularizers.l2(0.0005),
                                       kernel_initializer=tf.random_normal_initializer(stddev=0.01)
                                       )(box3)
@@ -70,13 +71,15 @@ class YOLOv4(object):
         pred = []
         for i, box in enumerate(boxes):
             box_shape = box.shape
-            box = tf.reshape(box, (-1, box_shape[1], box_shape[2], 3, self.num_classes + 5 if self.num_classes>1 else 5))
+            box = tf.reshape(box, (-1, box_shape[1], box_shape[2], 3, self.num_classes + 5 ))#if self.num_classes>1 else 5))
 
-            if self.num_classes>1:
-                xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
-                pred_cls = tf.sigmoid(cls)
-            else:
-                xy, wh, conf = tf.split(box, ([2, 2, 1]), -1)
+            # if self.num_classes>1:
+            #     xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
+            #     pred_cls = tf.sigmoid(cls)
+            # else:
+            #     xy, wh, conf = tf.split(box, ([2, 2, 1]), -1)
+            xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
+            pred_cls = tf.sigmoid(cls)
             shape = tf.shape(xy)
 
             xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1]))  # w,h
@@ -86,10 +89,11 @@ class YOLOv4(object):
             pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])-0.5*(self.sigmoid_scale[i]-1)+xy_grid)
             pred_wh = tf.exp(wh) * self.anchors[i]
             pred_conf = tf.sigmoid(conf)
-            if self.num_classes>1:
-                pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
-            else:
-                pred.append(tf.concat([pred_xy, pred_wh, pred_conf], -1))
+            # if self.num_classes>1:
+            #     pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
+            # else:
+            #     pred.append(tf.concat([pred_xy, pred_wh, pred_conf], -1))
+            pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
 
         return pred
 
