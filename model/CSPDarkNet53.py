@@ -9,7 +9,7 @@ def resblock(input,filter,i,j):
     else:
         x = conv2d(x,filter,3,name='block_{}_{}_conv3'.format(i,j),gamma_zero=True)
 
-    return tf.keras.layers.Add()([input,x])
+    return input+x
 
 class CSPDarkNet53(object):
     def __init__(self,args,num_classes=None,include_top=False):

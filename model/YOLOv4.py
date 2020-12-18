@@ -3,7 +3,7 @@ from model import CSPDarkNet53
 from model import CSPDarkNet53_tiny
 
 class YOLOv4(object):
-    def __init__(self,args,hyp,stride=None,anchor=None,sigmoid_scale=None):
+    def __init__(self,args,hyp=None,stride=None,anchor=None,sigmoid_scale=None):
         if stride:
             self.stride = stride
         else:
@@ -19,10 +19,11 @@ class YOLOv4(object):
         else:
             self.sigmoid_scale = default_sigmoid_scale()
 
-        self.gr = 0.02
-        self.hyp = hyp
         self.batch_size = args.batch_size
+        self.img_size = args.img_size
         if args.mode=='train':
+            self.gr = 0.02
+            self.hyp = hyp
             self.update_batch = args.update_batch
             self.soft = args.soft
         self.anchors = make_anchor(self.stride,self.anchor)
@@ -70,8 +71,9 @@ class YOLOv4(object):
     def pred(self, boxes):
         pred = []
         for i, box in enumerate(boxes):
-            box_shape = box.shape
-            box = tf.reshape(box, (-1, box_shape[1], box_shape[2], 3, self.num_classes + 5 ))#if self.num_classes>1 else 5))
+            #box_shape = box.shape
+            grid = self.img_size//self.stride[i]
+            box = tf.reshape(box, (self.batch_size, grid, grid, 3, self.num_classes + 5 ))#if self.num_classes>1 else 5))
 
             # if self.num_classes>1:
             #     xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
@@ -80,11 +82,11 @@ class YOLOv4(object):
             #     xy, wh, conf = tf.split(box, ([2, 2, 1]), -1)
             xy, wh, conf, cls = tf.split(box, ([2, 2, 1, self.num_classes]), -1)
             pred_cls = tf.sigmoid(cls)
-            shape = tf.shape(xy)
+            #shape = tf.shape(xy)
 
-            xy_grid = tf.meshgrid(tf.range(shape[2]), tf.range(shape[1]))  # w,h
+            xy_grid = tf.meshgrid(tf.range(grid), tf.range(grid))  # w,h
             xy_grid = tf.expand_dims(tf.stack(xy_grid, -1), 2)
-            xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [shape[0], 1, 1, 3, 1]), tf.float32)  # b,h,w,3,2
+            xy_grid = tf.cast(tf.tile(tf.expand_dims(xy_grid, axis=0), [self.batch_size, 1, 1, 3, 1]), tf.float32)  # b,h,w,3,2
 
             pred_xy = ((tf.sigmoid(xy)*self.sigmoid_scale[i])-0.5*(self.sigmoid_scale[i]-1)+xy_grid)
             pred_wh = tf.exp(wh) * self.anchors[i]
@@ -93,6 +95,7 @@ class YOLOv4(object):
             #     pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
             # else:
             #     pred.append(tf.concat([pred_xy, pred_wh, pred_conf], -1))
+
             pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
 
         return pred
@@ -182,7 +185,7 @@ class YOLOv4(object):
 
 
 class YOLOv4_tiny(object):
-    def __init__(self,args,hyp,stride=None,anchor=None,sigmoid_scale=None):
+    def __init__(self,args,hyp=None,stride=None,anchor=None,sigmoid_scale=None):
         if stride:
             self.stride = stride
         else:

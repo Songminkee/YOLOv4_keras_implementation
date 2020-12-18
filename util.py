@@ -289,35 +289,89 @@ def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
          64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
     return x
 
-def merge_info(box,classes,stride):
+def merge_info(box,classes,stride,img_size=416):
     batch = tf.shape(box)[0]
-    # if classes>1:
-    #     xy,wh, conf, cls = tf.split(box, [2,2,1, classes], -1)
-    #     cls_conf = conf * cls
-    # else:
-    #     xy, wh, cls_conf = tf.split(box, [2, 2, 1], -1)
+    grid = img_size//stride
+
     xy,wh, conf, cls = tf.split(box, [2,2,1, classes], -1)
     cls_conf = conf * cls
 
     xywh = tf.concat([xy,wh],-1)*stride
 
-    xywh = tf.reshape(xywh,[batch,-1,4])
-    cls_conf = tf.reshape(cls_conf,[batch,-1,classes])
+    xywh = tf.reshape(xywh,[batch,3*(grid**2),4])
+    cls_conf = tf.reshape(cls_conf,[batch,3*(grid**2),classes])
     return tf.concat([xywh, cls_conf],-1)
 
-def inference(yolo,input,args):
+def get_decoded_pred(YOLO):
     '''
-    :param yolo: Yolo model class
-    :param input: Input image
-    :param args: args must have information about confidence_threshold, img_size,batch_size,iou_threshold, score_threshold.
-    :return: boxes, scores, classes, valid_detections information through NMS
+    The result is the same as applying the decode function after YOLO.pred.
+        :param yolo: Yolo model class
+        :return: xywh, cls
     '''
-    boxes = yolo.model(input,training=False)
-    boxes = tf.concat([merge_info(box, yolo.num_classes, yolo.stride[i]) for i, box in enumerate(boxes)], 1)
+    feat = YOLO.box_feature
+    cls = []
+    xywh = []
+    print("an",YOLO.anchors)
+    print("st",YOLO.stride)
+    print("sc",YOLO.sigmoid_scale)
+    for i, box in enumerate(feat):
+        grid = YOLO.img_size // YOLO.stride[i]
+        conv_raw_dxdy_0, conv_raw_dwdh_0, conv_raw_score_0, \
+        conv_raw_dxdy_1, conv_raw_dwdh_1, conv_raw_score_1, \
+        conv_raw_dxdy_2, conv_raw_dwdh_2, conv_raw_score_2 = tf.split(box,
+                                                                      (2, 2, 1 + YOLO.num_classes, 2, 2,
+                                                                       1 + YOLO.num_classes,
+                                                                       2, 2, 1 + YOLO.num_classes), axis=-1)
+        conv_raw_score = [conv_raw_score_0, conv_raw_score_1, conv_raw_score_2]
+        for idx, score in enumerate(conv_raw_score):
+            score = tf.sigmoid(score)
+            score = score[:, :, :, 0:1] * score[:, :, :, 1:]
+            conv_raw_score[idx] = tf.reshape(score, (1, -1, YOLO.num_classes))
+        pred_prob = tf.concat(conv_raw_score, axis=1)
+        conv_raw_dwdh = [conv_raw_dwdh_0, conv_raw_dwdh_1, conv_raw_dwdh_2]
+
+        for idx, dwdh in enumerate(conv_raw_dwdh):
+            dwdh = tf.exp(dwdh) * YOLO.anchors[i][idx]
+            conv_raw_dwdh[idx] = tf.reshape(dwdh, (1, -1, 2))
+        pred_wh = tf.concat(conv_raw_dwdh, axis=1)
+
+        xy_grid = tf.meshgrid(tf.range(grid), tf.range(grid))
+        xy_grid = tf.stack(xy_grid, axis=-1)  # [gx, gy, 2]
+        xy_grid = tf.expand_dims(xy_grid, axis=0)
+        xy_grid = tf.cast(xy_grid, tf.float32)
+
+        conv_raw_dxdy = [conv_raw_dxdy_0, conv_raw_dxdy_1, conv_raw_dxdy_2]
+        for idx, dxdy in enumerate(conv_raw_dxdy):
+            dxdy = ((tf.sigmoid(dxdy) * YOLO.sigmoid_scale[i]) - 0.5 * (YOLO.sigmoid_scale[i] - 1) + xy_grid)
+            conv_raw_dxdy[idx] = tf.reshape(dxdy, (1, -1, 2))
+        pred_xy = tf.concat(conv_raw_dxdy, axis=1)
+        pred_xywh = tf.concat([pred_xy, pred_wh], axis=-1) * YOLO.stride[i]
+        cls.append(pred_prob)
+        xywh.append(pred_xywh)
+    cls = tf.concat(cls, 1)
+    xywh = tf.concat(xywh, 1)
+    return (xywh, cls)
+
+def decode(yolo,input):
+    '''
+        :param yolo: Yolo model class
+        :param input: Input image
+        :param args: args must have information about confidence_threshold, img_size.
+        :return: box,cls_conf
+    '''
+    boxes = yolo.model(input, training=False)
+    boxes = tf.concat([merge_info(box, yolo.num_classes, yolo.stride[i],yolo.img_size) for i, box in enumerate(boxes)], 1)
 
     # Eliminate low confidence
     xywh, cls = tf.split(boxes, [4, yolo.num_classes], -1)
+    return xywh,cls
 
+def tf_nms_format(xywh,cls,args):
+    '''
+        :param xywh,cls_conf: decoded information. xywh =bbox.
+        :param args: args must have information about batch_size, iou_threshold, score_threshold.
+        :return: boxes, scores, classes, valid_detections information through NMS
+    '''
     scores_max = tf.math.reduce_max(cls, axis=-1)
     mask = scores_max >= args.confidence_threshold
 
@@ -333,16 +387,23 @@ def inference(yolo,input,args):
 
     box_mins = (box_yx - (box_hw / 2.)) / args.img_size
     box_maxes = (box_yx + (box_hw / 2.)) / args.img_size
-    box = tf.concat([
+    xyxy = tf.concat([
         box_mins[..., 0:1],  # y_min
         box_mins[..., 1:2],  # x_min
         box_maxes[..., 0:1],  # y_max
         box_maxes[..., 1:2]  # x_max
     ], axis=-1)
+    return xyxy,cls_conf
 
+def tf_nms(xyxy,cls_conf,args):
+    '''
+        :param box,cls_conf: decoded information. xyxy = bbox.
+        :param args: args must have information about batch_size, iou_threshold, score_threshold.
+        :return: boxes, scores, classes, valid_detections information through NMS
+    '''
     # NMS
     boxes, scores, classes, valid_detections = tf.image.combined_non_max_suppression(
-        boxes=tf.reshape(box, (args.batch_size, -1, 1, 4)),
+        boxes=tf.reshape(xyxy, (args.batch_size, -1, 1, 4)),
         scores=tf.reshape(
             cls_conf, (args.batch_size, -1, tf.shape(cls_conf)[-1])),
         max_output_size_per_class=100,
@@ -351,6 +412,17 @@ def inference(yolo,input,args):
         score_threshold=args.score_threshold,
     )
     return boxes, scores, classes, valid_detections
+
+def inference(xywh,cls,args):
+    '''
+    :param xywh,cls: decoded information by tf_lite_pred or decode function.
+    :param input: Input image
+    :param args: args must have information about confidence_threshold, img_size,batch_size,iou_threshold, score_threshold.
+    :return: boxes, scores, classes, valid_detections information through NMS
+    '''
+    xyxy,cls_conf = tf_nms_format(xywh,cls,args)
+    return tf_nms(xyxy,cls_conf,args)
+
 
 def convert_to_origin_shape(box,pad=None,ratio=None,h0=None,w0=None,h=None,w=None,is_padding=False):
     '''

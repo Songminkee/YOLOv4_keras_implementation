@@ -10,7 +10,6 @@ from dataloader import loader
 import numpy as np
 import time
 from util import load_darknet_weights
-import gc
 
 #print(tf.config.experimental.list_physical_devices('GPU'))
 

@@ -11,3 +11,5 @@ coco_test2017.txt
 .vscode/
 eval/
 box_dataset/
+*.tflite
+saved_model/

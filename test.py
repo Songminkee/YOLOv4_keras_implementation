@@ -36,7 +36,8 @@ def test_coco(args,hyp,test_set):
     for img,id,pad,(h0,w0),ratio,label in test_set:
         h, w, _ = img[0].shape
 
-        boxes, scores, classes, valid_detections = inference(YOLO,img,args)
+        xywh, cls = decode(YOLO, img)
+        boxes, scores, classes, valid_detections = inference(xywh, cls, args)
         label[:,1:] = scaled_xywh2xyxy(label[:,1:],h0,w0)
 
         positive=np.zeros((valid_detections[0].numpy()),dtype=np.bool)
@@ -117,8 +118,8 @@ def test(args,hyp,test_set):
 
     for img, _, pad, (h0, w0), ratio, label in test_set:
         h, w, _ = img[0].shape
-
-        boxes, scores, classes, valid_detections = inference(YOLO, img, args)
+        xywh,cls = decode(YOLO,img)
+        boxes, scores, classes, valid_detections = inference(xywh, cls, args)
         label[:, 1:] = scaled_xywh2xyxy(label[:, 1:], h0, w0)
 
         positive = np.zeros((valid_detections[0].numpy()), dtype=np.bool)
@@ -196,6 +197,7 @@ if __name__== '__main__':
     parser.add_argument('--annotation_path', type=str, default='./data/dataset/COCO/annotations',help= 'COCO annotation file folder / default : "./data/dataset/COCO/annotations"')
     parser.add_argument('--is_darknet_weight', action='store_false', help = 'If true, load the weight file used by the darknet framework.')
     parser.add_argument('--is_tiny', action='store_true', help = 'Flag for using tiny. / default : false')
+    parser.add_argument('--is_tflite', action='store_true', help='Flag for using tflite. / default : false')
     parser.add_argument('--is_coco', action='store_true', help='Flag for coco dataset. / default : true')
     parser.add_argument('--is_padding', action='store_true', help = ' If true, padding is performed to maintain the ratio of the input image. / default : false')
     parser.add_argument('--confidence_threshold', type=float, default=0.001)
