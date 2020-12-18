@@ -99,6 +99,32 @@ python eval.py
 
 
 
+# Convert to tflite
+
+1. Download weights from [darknet](https://github.com/AlexeyAB/darknet) or [yolov4.weights](https://drive.google.com/file/d/1cewMfusmPjYWbrnuJRuKhPMwRe_b9PaT/view)
+
+2. Convert to keras model
+
+   ```
+   python save_model.py --data_root ./data --class_file coco.names --is_darknet_weight --weight_path ./weight/yolov4.weights --num_classes 80 --out_path ./saved_model/darknet_weight
+   ```
+
+3. Convert to tflite 
+
+   ```
+   python convert_tflite.py --num_classes 80 --dataset './data/dataset/coco_val2017.txt' --weight_path ./saved_model/darknet_weight --out_model ./darknet.tflite --quantize_mode float16
+   ```
+
+4. Detect
+
+   ```
+   python detect.py --num_classes 80 --input_dir './data/dataset/COCO/images/val2017' --weight_path darknet.tflite --data_name cooc --is_tflite
+   ```
+
+   
+
+
+
 ### References
 
   * YOLOv4: Optimal Speed and Accuracy of Object Detection [YOLOv4](https://arxiv.org/abs/2004.10934).
