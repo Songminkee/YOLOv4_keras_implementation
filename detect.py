@@ -1,41 +1,41 @@
 import os
-#os.environ['TF_CPP_MIN_VLOG_LEVEL'] = '3'
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_CPP_MIN_VLOG_LEVEL'] = '3'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from model import YOLOv4
 from util import *
 import cv2
 from tensorflow.python.saved_model import tag_constants
 
-def detect(image,YOLO,class_name,args,input_details=None,output_details=None):
-    image = np.squeeze(image)
-    img = image.copy() / 255.0
-    h, w, _ = img.shape
-    if h != args.img_size or w != args.img_size:
-        img = cv2.resize(img,(args.img_size,args.img_size))
+
+def model_detection(img, YOLO, args, input_details=None, output_details=None):
     if args.is_saved_model:
         pred = YOLO(tf.constant(img[np.newaxis,...].astype(np.float32)))
         for k in pred.keys():
             decoded_pred = pred[k]
-        xywh,cls = tf.split(decoded_pred,[4,1],-1)
-        print(xywh)
-        print(cls)
-        boxes, scores, classes, valid_detections = inference(xywh,cls,args)
+        xywh, cls = tf.split(decoded_pred,[4,1],-1)
     elif args.is_tflite:
-        YOLO.set_tensor(input_details[0]['index'], img[np.newaxis, ...].astype(np.float32))#img[np.newaxis, ...].astype(np.float32))
+        YOLO.set_tensor(input_details[0]['index'], img[np.newaxis, ...].astype(np.float32))     # img[np.newaxis, ...].astype(np.float32))
         YOLO.invoke()
         output_data = [YOLO.get_tensor(output_details[i]['index']) for i in range(len(output_details))]
-        print(output_data)
-        xywh,cls = tf.split(output_data[0],[4,1],-1)
-        print(xywh)
-        print(cls)
-        boxes, scores, classes, valid_detections = inference(xywh,cls,args)
+        xywh, cls = tf.split(output_data[0],[4,1],-1)
     else:
         xywh, cls = decode(YOLO, img[np.newaxis, :, :, :])
-        print(xywh)
-        print(cls)
-        boxes, scores, classes, valid_detections = inference(xywh, cls, args)
 
+    result = inference(xywh, cls, args)
+    return result
+
+
+def detect(image, YOLO, class_name, args, input_details=None, output_details=None):
+    image = np.squeeze(image)
+    img = image.copy() / 255.0
+    h, w, _ = img.shape
+    if h != args.img_size or w != args.img_size:
+        img = cv2.resize(img, (args.img_size, args.img_size))
+
+    boxes, scores, classes, valid_detections = model_detection(img, YOLO, args,
+                                                               input_details=input_details,
+                                                               output_details=output_details)
 
     bbox_thick = int(0.6 * (h + w) / 600)
     scores, classes, valid_detections = np.float32(np.squeeze(scores)), np.int32(np.squeeze(classes)), np.int32(
@@ -63,20 +63,18 @@ def detect(image,YOLO,class_name,args,input_details=None,output_details=None):
 
     return image
 
-def detect_example(args,hyp):
-    physical_devices = tf.config.experimental.list_physical_devices('GPU')
-    if len(physical_devices) > 0:
-        tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
+def select_yolo(args, hyp):
     if args.is_tiny:
         YOLO = YOLOv4.YOLOv4_tiny(args,hyp)
     else:
         YOLO = YOLOv4.YOLOv4(args, hyp)
     input_details= None
     output_details=None
+    saved_model_loaded=None
     if args.weight_path!='':
         if args.is_darknet_weight:
-            print('load darkent weight from {}'.format(args.weight_path))
+            print('load darknet weight from {}'.format(args.weight_path))
             load_darknet_weights(YOLO.model,args.weight_path,args.is_tiny)
         elif args.is_saved_model:
             print('load saved model from {}'.format(args.weight_path))
@@ -91,6 +89,16 @@ def detect_example(args,hyp):
             print('load tf weight from {}'.format(args.weight_path))
             YOLO.model.load_weights(args.weight_path).expect_partial()
 
+    return YOLO, input_details, output_details,saved_model_loaded
+
+
+def detect_example(args,hyp):
+    physical_devices = tf.config.experimental.list_physical_devices('GPU')
+    if len(physical_devices) > 0:
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+
+    YOLO, input_details, output_details,saved_model_loaded = select_yolo(args, hyp)
+
     class_name = load_class_name(args.data_root, args.class_file)
     image_pathes = glob.glob(os.path.join(args.input_dir,'*.jpg'))
 
@@ -101,7 +109,6 @@ def detect_example(args,hyp):
         cv2.waitKey()
 
 
-
 if __name__== '__main__':
     import argparse
 
@@ -110,7 +117,7 @@ if __name__== '__main__':
     parser.add_argument('--data_root',              type=str,   help='Root path of class name file and coco_%2017.txt / default : "./data"', default='./data')
     parser.add_argument('--class_file',              type=str,   help='Class name file / default : "coco.name"', default='box.names') # 'coco.names'
     parser.add_argument('--num_classes', type=int, help='Number of classes (in COCO 80) ', default=80) # 80
-    parser.add_argument('--weight_path',type=str,default='weight/box/final', help='path of weight') # 'dark_weight/yolov4.weights'
+    parser.add_argument('--weight_path',type=str,default='weight/box/final', help='path of weight')     # 'dark_weight/yolov4.weights'
     parser.add_argument('--is_saved_model', action='store_true',help = 'If ture, load saved model')
     parser.add_argument('--is_tflite', action='store_true', help='If ture, load saved model')
     parser.add_argument('--is_darknet_weight', action='store_true', help = 'If true, load the weight file used by the darknet framework.') # 'store_false'
