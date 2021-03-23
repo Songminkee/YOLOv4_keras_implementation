@@ -54,7 +54,7 @@ def main(args, hyp):
         frame_index = -1
 
     fps = 0.0
-
+    convert_class_name = load_class_name(args.data_root, args.class_file)
     while True:
         ret, frame = video_capture.read()  # frame shape 640*480*3
         if not ret:
@@ -67,15 +67,17 @@ def main(args, hyp):
         if h != args.img_size or w != args.img_size:
             img = cv2.resize(img, (args.img_size, args.img_size))
         inf_time = time.time()
-        convert_class_name = load_class_name(args.data_root, args.class_file)
+        
         boxes, confidence, class_names, valid_detections= model_detection(img, YOLO, args, input_details, output_details)
+        print("inf time",time.time()-inf_time)
+        tran_time = time.time()
         y_min, x_min, y_max, x_max = convert_to_origin_shape(boxes, None, None, h, w)
         w,h = x_max-x_min , y_max-y_min
         boxes = np.concatenate([x_min, y_min, w, h], -1)
 
         boxes = tf.squeeze(boxes, 0)      # 100, 4
         class_names = tf.squeeze(class_names, 0)
-        print("inf time",time.time()-inf_time)
+        print("tran time",time.time()-tran_time)        
         st_t = time.time()
         features = encoder(frame, boxes[:valid_detections[0]])
         detections = [Detection(bbox, 1.0, feature) for bbox, feature in zip(boxes, features)]
@@ -178,26 +180,31 @@ if __name__ == '__main__':
                         help='Root path of class name file and coco_%2017.txt / default : "./data"'
                         , default='coco')
     args = parser.parse_args()
-
-    args.mode='eval'
-    args.soft = 0.0
+    args.mode = 'eval'
     args.batch_size = 1
 
-    hyp = {'giou': 3.54,  # giou loss gain
-           'cls': 37.4,  # cls loss gain
-           'obj': 64.3,  # obj loss gain (*=img_size/320 if img_size != 320)
+    hyp = {'giou': 1.0,#3.54,  # giou loss gain
+           'cls': 1.0,#37.4,  # cls loss gain
+           'cls_pw' : 1.0,
+           'obj': 1.0,#83.59,  # obj loss gain (=64.3*img_size/320 if img_size != 320)
+           'obj_pw' : 1.0,
            'iou_t': 0.213,  # iou training threshold
-           'lr0': 0.01,  # initial learning rate (SGD=5E-3, Adam=5E-4)
-           'lrf': 0.0005,  # final learning rate (with cos scheduler)
+           'lr0': 0.0013,  # initial learning rate (SGD=5E-3, Adam=5E-4)
+           'lrf': 0.00013,  # final learning rate (with cos scheduler)
            'momentum': 0.949,  # SGD momentum
-           'weight_decay': 0.000484,  # optimizer weight decay
-           'fl_gamma': 0.0,  # focal loss gamma (efficientDet default is gamma=1.5)
+           'fl_gamma': 2.0,  # focal loss gamma (efficientDet default is gamma=1.5)
            'hsv_h': 0.0138,  # image HSV-Hue augmentation (fraction)
            'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)
            'hsv_v': 0.36,  # image HSV-Value augmentation (fraction)
-           'degrees': 1.98 * 0,  # image rotation (+/- deg)
-           'translate': 0.05 * 0,  # image translation (+/- fraction)
-           'scale': 0.5,  # image scale (+/- gain)
-           'shear': 0.641 * 0}  # image shear (+/- deg)
+           'degrees': 0,#1.98,#10.0,#1.98 * 0,  # image rotation (+/- deg)
+           'translate':0.5, #0.1,#0.05 * 0,  # image translation (+/- fraction)
+           'scale':0.1,  # image scale (+/- gain)
+           'shear':0,# 0.1,#0.641 * 0}  # image shear (+/- deg)
+           'ignore_threshold': 0.7,
+           'border' : 2,
+           'flip_lr' : 0.5,
+           'flip_ud' : 0.0,
+           'soft' : 0.0
+           }
 
     main(args, hyp)

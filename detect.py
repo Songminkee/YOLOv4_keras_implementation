@@ -6,13 +6,15 @@ from model import YOLOv4
 from util import *
 import cv2
 from tensorflow.python.saved_model import tag_constants
-
+import time
 
 def model_detection(img, YOLO, args, input_details=None, output_details=None):
+    pred_time = time.time()
     if args.is_saved_model:
         pred = YOLO(tf.constant(img[np.newaxis,...].astype(np.float32)))
         for k in pred.keys():
             decoded_pred = pred[k]
+            break
         xywh, cls = tf.split(decoded_pred,[4,1],-1)
     elif args.is_tflite:
         YOLO.set_tensor(input_details[0]['index'], img[np.newaxis, ...].astype(np.float32))     # img[np.newaxis, ...].astype(np.float32))
@@ -21,8 +23,10 @@ def model_detection(img, YOLO, args, input_details=None, output_details=None):
         xywh, cls = tf.split(output_data[0],[4,1],-1)
     else:
         xywh, cls = decode(YOLO, img[np.newaxis, :, :, :])
-
+    print("pred_time",time.time()-pred_time)
+    result_time = time.time()
     result = inference(xywh, cls, args)
+    print("result_time",time.time()-result_time)
     return result
 
 
@@ -115,14 +119,14 @@ if __name__== '__main__':
     parser = argparse.ArgumentParser(description='YOLOv4 Test')
     parser.add_argument('--img_size',              type=int,   help='Size of input image / default : 416', default=416)
     parser.add_argument('--data_root',              type=str,   help='Root path of class name file and coco_%2017.txt / default : "./data"', default='./data')
-    parser.add_argument('--class_file',              type=str,   help='Class name file / default : "coco.name"', default='box.names') # 'coco.names'
+    parser.add_argument('--class_file',              type=str,   help='Class name file / default : "coco.name"', default='coco.names') # 'coco.names'
     parser.add_argument('--num_classes', type=int, help='Number of classes (in COCO 80) ', default=80) # 80
-    parser.add_argument('--weight_path',type=str,default='weight/box/final', help='path of weight')     # 'dark_weight/yolov4.weights'
+    parser.add_argument('--weight_path',type=str,default='dark_weight/yolov4.weights', help='path of weight')     # 'dark_weight/yolov4.weights'
     parser.add_argument('--is_saved_model', action='store_true',help = 'If ture, load saved model')
     parser.add_argument('--is_tflite', action='store_true', help='If ture, load saved model')
     parser.add_argument('--is_darknet_weight', action='store_true', help = 'If true, load the weight file used by the darknet framework.') # 'store_false'
     parser.add_argument('--is_tiny', action='store_true', help = 'Flag for using tiny. / default : false')
-    parser.add_argument('--input_dir',type=str,default='./data/dataset/box_dataset/images/val')
+    parser.add_argument('--input_dir',type=str,default='./data/dataset/COCO/images/val2017')
     parser.add_argument('--confidence_threshold', type=float, default=0.001)
     parser.add_argument('--iou_threshold', type=float, default=0.1)
     parser.add_argument('--score_threshold', type=float, default=0.1)
@@ -142,7 +146,6 @@ if __name__== '__main__':
            'lr0': 0.01,  # initial learning rate (SGD=5E-3, Adam=5E-4)
            'lrf': 0.0005,  # final learning rate (with cos scheduler)
            'momentum': 0.949,  # SGD momentum
-           'weight_decay': 0.000484,  # optimizer weight decay
            'fl_gamma': 0.0,  # focal loss gamma (efficientDet default is gamma=1.5)
            'hsv_h': 0.0138,  # image HSV-Hue augmentation (fraction)
            'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)

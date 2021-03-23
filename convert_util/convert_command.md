@@ -11,5 +11,9 @@ python convert_util/converter.py --img_path [coco image folder] --label [coco an
 ```
 python convert_util/converter.py --img_path ./data/dataset/COCO/images/train2017/ --label ./data/dataset/COCO/annotations/instances_train2017.json --convert_output_path ./data/dataset/COCO/labels/train2017 --img_type ".jpg" --manifest_path ./data/dataset/ --cls_list_file ./data/dataset/COCO/annotations/coco.names --manifest_name coco_train2017
 ```
+```
+python convert_util/converter.py --img_path ./data/dataset/COCO/images/val2017/ --label ./data/dataset/COCO/annotations/instances_val2017.json --convert_output_path ./data/dataset/COCO/labels/val2017 --img_type ".jpg" --manifest_path ./data/dataset/ --cls_list_file ./data/dataset/COCO/annotations/coco.names --manifest_name coco_val2017
+```
+
 
 

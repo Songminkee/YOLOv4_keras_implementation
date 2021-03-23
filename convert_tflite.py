@@ -16,9 +16,11 @@ parser.add_argument('--out_model',type=str, default='./fine_tune16.tflite',
                     help='name of tflite model')
 parser.add_argument('--quantize_mode', type=str, default='float16',
                     help='quantize_mode of tflite model')
-parser.add_argument('--is_padding', action='store_true',
+parser.add_argument('--letter_box', action='store_true',
                     help=' If true, padding is performed to maintain the ratio of the input image. / default : false')
+
 args = parser.parse_args()
+args.mode='eval'
 def letterbox(img, new_shape=(416, 416), color=(114, 114, 114)):
     shape = img.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):

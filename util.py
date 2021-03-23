@@ -4,8 +4,20 @@ import numpy as np
 import math
 import os
 
+# class BatchNormalization(tf.keras.layers.BatchNormalization):
+#     # "Frozen state" and "inference mode" are two separate concepts.
+#     # `layer.trainable = False` is to freeze the layer, so the layer will use
+#     # stored moving `var` and `mean` in the "inference mode", and both `gama`
+#     # and `beta` will not be updated !
+#     def call(self, x, training=False):
+#         if not training:
+#             training = tf.constant(False)
+#         training = tf.logical_and(training, self.trainable)
+#         return super().call(x, training)
+
 def mish(x,name):
-    return x * tf.nn.tanh( tf.nn.softplus(x),name=name)
+    return x * tf.math.tanh(tf.math.softplus(x))
+#    return x * tf.nn.tanh( tf.nn.softplus(x),name=name)
 
 def upsample(x):
     return tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
@@ -13,21 +25,28 @@ def upsample(x):
 def conv2d(x,filter,kernel,stride=1,name=None,activation='mish',gamma_zero=False):
     if stride==1:
         x = tf.keras.layers.Conv2D(filter,kernel,stride,padding='same',use_bias=False,
-                               kernel_initializer=tf.random_normal_initializer(stddev=0.01))(x)
+                               kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                               #kernel_initializer=tf.random_normal_initializer(stddev=0.01),
+                               kernel_initializer=tf.keras.initializers.RandomUniform(minval=-0.002, maxval=0.002)#tf.random_normal_initializer(stddev=0.01)
+                               )(x)
     else:
         x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
         x = tf.keras.layers.Conv2D(filter, kernel, stride, padding='valid', use_bias=False,
-                                   kernel_initializer=tf.random_normal_initializer(stddev=0.01))(x)
+                                   kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                   #kernel_initializer=tf.random_normal_initializer(stddev=0.01),
+                                   kernel_initializer=tf.keras.initializers.RandomUniform(minval=-0.002, maxval=0.002)#tf.random_normal_initializer(stddev=0.01)
+                                   )(x)
 
-    if gamma_zero:
-        x = tf.keras.layers.BatchNormalization(momentum=0.03, epsilon=1e-4,gamma_initializer='zeros')(x)
-    else:
-        x = tf.keras.layers.BatchNormalization( momentum=0.03, epsilon=1e-4)(x)
-
+    # if gamma_zero:
+    #     x = tf.keras.layers.BatchNormalization(momentum=0.03, epsilon=1e-3,gamma_initializer='zeros')(x)
+    # else:
+    # x = BatchNormalization()(x)
+    x = tf.keras.layers.BatchNormalization(momentum=0.9,epsilon=1e-5)(x)
+    #x = tf.keras.layers.BatchNormalization( momentum=0.03, epsilon=1e-4)(x)
     if activation=='mish':
         return mish(x,name)
     elif activation=='leaky':
-        return tf.nn.leaky_relu(x, alpha=0.1)#tf.keras.layers.LeakyReLU(name=name,alpha=0.1)(x)
+        return tf.keras.layers.LeakyReLU(alpha=0.1)(x)#(conv)#tf.nn.leaky_relu(x, alpha=0.1)#tf.keras.layers.LeakyReLU(name=name,alpha=0.1)(x)
 
 def convset(x, filter):
     x = conv2d(x, filter, 1,activation='leaky')
@@ -77,26 +96,27 @@ def default_sigmoid_scale(is_tiny=False):
         return np.array([1.05,1.05])
     return np.array([1.2, 1.1, 1.05])
 
-def wh_iou(anchor, label):
-    # Returns the nxm IoU matrix. wh1 is nx2, wh2 is mx2
-    # wh1 = wh1[:, None]  # [N,1,2]
-    # wh2 = wh2[None]  # [1,M,2]
-    b,max_label,_=label.shape # [batch,max_label,2]
+def box_iou(box1,box2):
+    """
+    Args:
+        xywh format box
+    """
+    area1 = box1[..., 2] * box1[..., 3]
+    area2 = box2[..., 2] * box2[..., 3]
+    box1 = tf.concat([box1[..., :2] - box1[..., 2:] * 0.5,
+                        box1[..., :2] + box1[..., 2:] * 0.5], axis=-1)
+    box2 = tf.concat([box2[..., :2] - box2[..., 2:] * 0.5,
+                        box2[..., :2] + box2[..., 2:] * 0.5], axis=-1)
+    left_up = tf.maximum(box1[..., :2], box2[..., :2])
+    right_down = tf.minimum(box1[..., 2:], box2[..., 2:])
 
-    anchor = tf.reshape(tf.cast(anchor,tf.float32),[1,1,3,2])
-    anchor = tf.tile(anchor,[b,max_label,1,1]) # [batch,3,max_label,2]
-    label = tf.tile(tf.expand_dims(label, 2),[1,1,3,1]) # [batch,3,max_label,2]
+    inter_section = tf.maximum(right_down - left_up, 0.0)
+    inter_area = inter_section[..., 0] * inter_section[..., 1]
+    union_area = area1 + area2 - inter_area
 
-    anchor_w,anchor_h = tf.split(anchor,([1,1]),-1)
-    label_w,label_h = tf.split(label,([1,1]),-1)
+    return 1.0 * inter_area / union_area
 
-    min_w = tf.reduce_min(tf.concat([anchor_w,label_w],-1),keepdims=True,axis=-1)
-    min_h = tf.reduce_min(tf.concat([anchor_h,label_h],-1),keepdims=True,axis=-1)
-    inter = min_w * min_h
-
-    return inter / (label_w*label_h + anchor_h*anchor_w - inter)  # iou = inter / (area1 + area2 - inter)
-
-def get_iou(pred_box,label):
+def get_iou_for_test(pred_box,label):
 
     pred_box = tf.reshape(pred_box,[-1,1,4])
     pred_box = tf.tile(pred_box,[1,label.shape[0],1])
@@ -119,49 +139,6 @@ def get_iou(pred_box,label):
 
     return tf.squeeze(inter / union)
 
-def label_scaler(out):
-    b,h,w,_,_ = out.shape
-    return tf.cast(tf.reshape([1,w,h,w,h],[1,1,5]),tf.float32)
-
-def get_idx(label):
-    b,max_label,_ = label.shape
-    _,gx,gy,_ = tf.split(label,[1,1,1,2],-1)
-    return tf.concat([tf.tile(tf.reshape(tf.range(0,b),[-1,1,1]),[1,max_label,1]),tf.cast(gy,tf.int32),tf.cast(gx,tf.int32)],-1)
-
-def build_overlap_target(anchor, label,hyp,out,is_best):
-    '''
-    Build target with overlapped coordinate
-    out : [b,grid,grid,3,(5+num_classes)]
-    is_best : [b,max_label,3,1] -> [b,max_label*3,5]
-    anchor : [3,2]
-    label : [b,max_label,5] -> [b,max_label*3,5]
-    '''
-    _, max_y, max_x, _, _ = out.shape
-    c, x, y, wh = tf.split(label, [1, 1, 1, 2], -1)
-    x_n = tf.where(tf.math.mod(x, 1.) > 0.5, x + 1, x - 1)
-    x_n = tf.where(tf.logical_and(x_n >= 0, x_n < max_x), tf.concat([c, x_n, y, wh], -1), 0)
-
-    y_n = tf.where(tf.math.mod(y, 1.) > 0.5, y + 1, y - 1)
-    y_n = tf.where(tf.logical_and(y_n >= 0, y_n < max_y), tf.concat([c, x, y_n, wh], -1), 0)
-
-    label = tf.concat([label, x_n, y_n], 1)
-    return build_target(anchor,label,hyp,tf.tile(is_best,[1,3,1,1]))
-
-
-def build_target(anchor,label,hyp,is_best):
-    '''
-    is_best : [b,max_label,3,1]
-    anchor : [3,2]
-    label : [b,max_label,5]
-    '''
-    iou = wh_iou(anchor, label[..., 3:])  # [b,max_label,3,1] 각 anchor 별 label과 iou
-    idx = get_idx(label)
-    label = tf.tile(tf.expand_dims(label,2),[1,1,3,1])
-    is_label = tf.reduce_sum(label, -1, keepdims=True) != 0
-    mask = tf.logical_and(is_label,tf.logical_or(iou> hyp['iou_t'],is_best))
-    return mask,idx,label
-
-
 def get_iou_loss(pred, label, method='GIoU'):
     nonan = tf.compat.v1.div_no_nan
     px, py, pw, ph = tf.split(pred, [1, 1, 1, 1], -1)
@@ -172,78 +149,57 @@ def get_iou_loss(pred, label, method='GIoU'):
     l_x1, l_x2 = lx - lw / 2.0, lx + lw / 2.0
     l_y1, l_y2 = ly - lh / 2.0, ly + lh / 2.0
 
-    con_x1 = tf.concat([p_x1, l_x1], -1)
-    con_x2 = tf.concat([p_x2, l_x2], -1)
-    con_y1 = tf.concat([p_y1, l_y1], -1)
-    con_y2 = tf.concat([p_y2, l_y2], -1)
+    in_left_up = tf.maximum(tf.concat([p_x1,p_y1],-1) , tf.concat([l_x1,l_y1],-1))
+    in_right_down = tf.minimum(tf.concat([p_x2,p_y2],-1),tf.concat([l_x2,l_y2],-1))
 
-    max_x1 = tf.reduce_max(con_x1, -1)
-    min_x2 = tf.reduce_min(con_x2, -1)
-
-    max_y1 = tf.reduce_max(con_y1, -1)
-    min_y2 = tf.reduce_min(con_y2, -1)
-
-    inter = tf.expand_dims((min_x2 - max_x1) * (min_y2 - max_y1), -1)
-
-    union = pw * ph + lw * lh - inter
-    iou = nonan(inter, union)
-
-    # where non overlapped
-    iou = tf.where(tf.expand_dims(tf.logical_and(min_y2 > max_y1, min_x2 > max_x1), -1), iou, 0.)
+    inter = tf.maximum(in_right_down - in_left_up, 0.0)
+    inter = inter[..., 0] * inter[..., 1]
+    
+    union = tf.squeeze(pw * ph+ lw*lh,axis=-1) - inter
+    iou = nonan(inter, union) * 1.0
 
     if method == 'IoU':
         return iou
-
-    cw = tf.reduce_max(con_x2, -1, keepdims=True) - tf.reduce_min(con_x1, -1, keepdims=True)
-    ch = tf.reduce_max(con_y2, -1, keepdims=True) - tf.reduce_min(con_y1, -1, keepdims=True)
+    
+    en_left_up = tf.minimum(tf.concat([p_x1,p_y1],-1) , tf.concat([l_x1,l_y1],-1))
+    en_right_down = tf.maximum(tf.concat([p_x2,p_y2],-1),tf.concat([l_x2,l_y2],-1))
+    enclose = tf.maximum(en_right_down - en_left_up, 0.0)
 
     if method == 'GIoU':
-        c_area = cw * ch
+        c_area = enclose[...,0] * enclose[...,1]
         return iou - nonan((c_area - union), c_area)
     elif method == 'DIoU' or method == 'CIoU':
-        c2 = cw ** 2 + ch ** 2
-        rho2 = (lx - px) ** 2 + (ly - py) ** 2
+        c2 = enclose[...,0] *enclose[...,0] + enclose[...,1] *enclose[...,1]
+        rho2 = tf.squeeze((lx - px) *(lx - px) + (ly - py) *(ly - py),axis=-1)
+        diou_term = nonan(rho2,c2)
         if method == 'DIoU':
-            return iou - nonan(rho2, c2)
+            return iou - diou_term
         else:
-            v = (4 / ((math.pi) ** 2)) * ((tf.math.atan2(pw, ph) - tf.math.atan2(lw, lh)) ** 2)
+            atan_tum = tf.squeeze(tf.atan(nonan(pw, ph)) - tf.atan(nonan(lw, lh)),axis=-1)
+            v = tf.stop_gradient(4 / (math.pi*math.pi) * atan_tum * atan_tum) #((tf.math.atan2(pw, ph) - tf.math.atan2(lw, lh)) ** 2)
             alpha = nonan(v, 1 - iou + v)
-            return iou - (nonan(rho2, c2) + v * alpha)
-
-def smoothing_value(classes,eps=0.0):
-    return (1.0-eps),eps/classes
-
-def get_threshold_mask(pred,label,ignore_threshold=0.7):
-    pred = tf.tile(tf.expand_dims(pred, -2), [1, 1, 1, 1, tf.shape(label)[1], 1])
-    label = tf.tile(tf.reshape(label, [tf.shape(pred)[0], 1, 1, 1, -1, 4]),
-                    [1, tf.shape(pred)[1], tf.shape(pred)[1], 3, 1, 1])
-    ious = tf.clip_by_value(get_iou_loss(pred, label, 'IoU'), 0.0, 1.0)
-    best_iou = tf.reduce_max(tf.where(tf.reduce_sum(label, axis=-1, keepdims=True) > 0., ious, 0.), 4)
-    return tf.squeeze(best_iou > ignore_threshold), best_iou
-
-def get_best_match_anchor(label,anchors):
-    ious = [wh_iou(anchors[i], label[i][..., 3:]) for i in range(len(anchors))]
-    ious = tf.concat(ious, 2) # [b, max_label, anchors*3, 1]
-    best = tf.logical_and(ious == tf.reduce_max(ious,2,keepdims=True),ious>0.)
-    return list(tf.split(best,[len(anchors) for _ in range(len(anchors))],axis=2)) # [b, max_label, 3, 1] x anchors
+            return iou - nonan(rho2, c2) + v * alpha
 
 # https://github.com/hunglc007/tensorflow-yolov4-tflite
-def load_darknet_weights(model, weights_file, is_tiny=False,include_top=True):
+def load_darknet_weights(model, weights_file, is_tiny=False,include_top=True,is_partial=False):
     if is_tiny:
-        if include_top:
+        if is_partial:
+            layer_size = 16
+        elif include_top:
             layer_size = 21
         else:
             layer_size = 15
         output_pos = [17, 20]
     else:
-        if include_top:
+        if is_partial:
+            layer_size = 92
+        elif include_top:
             layer_size = 110
         else:
             layer_size = 78
         output_pos = [93, 101, 109]
     wf = open(weights_file, 'rb')
     major, minor, revision, seen, _ = np.fromfile(wf, dtype=np.int32, count=5)
-
     j = 0
     for i in range(layer_size):
         conv_layer_name = 'conv2d_%d' %i if i > 0 else 'conv2d'
@@ -251,6 +207,8 @@ def load_darknet_weights(model, weights_file, is_tiny=False,include_top=True):
 
         conv_layer = model.get_layer(conv_layer_name)
         filters = conv_layer.filters
+        if i==output_pos and filters != 255:
+            continue
         k_size = conv_layer.kernel_size[0]
         in_dim = conv_layer.input_shape[-1]
 
@@ -262,18 +220,15 @@ def load_darknet_weights(model, weights_file, is_tiny=False,include_top=True):
             bn_layer = model.get_layer(bn_layer_name)
             j += 1
         else:
-            try:
-                conv_bias = np.fromfile(wf, dtype=np.float32, count=filters)
-            except:
-                pass
-
+            conv_bias = np.fromfile(wf,dtype=np.float32,count=filters)
 
         # darknet shape (out_dim, in_dim, height, width)
         conv_shape = (filters, in_dim, k_size, k_size)
         conv_weights = np.fromfile(wf, dtype=np.float32, count=np.product(conv_shape))
+
         # tf shape (height, width, in_dim, out_dim)
         conv_weights = conv_weights.reshape(conv_shape).transpose([2, 3, 1, 0])
-
+        
         if i not in output_pos:
             conv_layer.set_weights([conv_weights])
             bn_layer.set_weights(bn_weights)
@@ -311,9 +266,6 @@ def get_decoded_pred(YOLO):
     feat = YOLO.box_feature
     cls = []
     xywh = []
-    print("an",YOLO.anchors)
-    print("st",YOLO.stride)
-    print("sc",YOLO.sigmoid_scale)
     for i, box in enumerate(feat):
         grid = YOLO.img_size // YOLO.stride[i]
         conv_raw_dxdy_0, conv_raw_dwdh_0, conv_raw_score_0, \
@@ -424,12 +376,12 @@ def inference(xywh,cls,args):
     return tf_nms(xyxy,cls_conf,args)
 
 
-def convert_to_origin_shape(box,pad=None,ratio=None,h0=None,w0=None,h=None,w=None,is_padding=False):
+def convert_to_origin_shape(box,pad=None,ratio=None,h0=None,w0=None,h=None,w=None,letter_box=False):
     '''
     :return: Convert the box information to information about the original original image.
     '''
     y_min, x_min, y_max, x_max = tf.split(box,[1,1,1,1],-1)
-    if is_padding:
+    if letter_box:
         left = int(round(pad[0] - 0.1))
         top = int(round(pad[1] - 0.1))
         x_min = (x_min * w - left) / ratio[0] / (w - pad[0] * 2) * w0
@@ -460,31 +412,80 @@ def ap_per_class(tp,conf,pred_cls,label_cls):
     ap,p,r = np.zeros(len(unique_cls)) , np.zeros(len(unique_cls)), np.zeros(len(unique_cls))
     for ci, c in enumerate(unique_cls):
         i = pred_cls == c
-        n_gt = np.sum(label_cls==c)
-        n_p = np.sum(i)
+        n_gt = np.sum(label_cls==c) # tp+nf, 실제 정답의 개수
+        n_p = np.sum(i) # tp
 
         if not n_gt or not n_p:
             continue
         # Accumulate FPs and TPs
         fpc = np.cumsum(1-tp[i])
         tpc = np.cumsum(tp[i])
-
+        print("fpc",fpc)
+        print("tpc",tpc)
         # Recall
         recall = tpc / (n_gt + 1e-16)  # recall curve
         r[ci] = np.interp(-0.1, -conf[i], recall)  # r at pr_score, negative x, xp because xp decreases
-
+        print(conf[i],recall)
+        print("r[ci]",r[ci])
         # Precision
         precision = tpc / (tpc + fpc)
         p[ci] = np.interp(-0.1, -conf[i], precision)
 
         mrec = np.concatenate(([0.], recall, [min(recall[-1] + 1E-3, 1.)]))
+        print("mrec",mrec)
         mpre = np.concatenate(([0.], precision, [0.]))
-
+        print("precision",precision)
+        print("mpre",mpre)
         # Compute the precision envelope
         mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
+        print("flip",mpre)
         x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
         ap[ci] = np.trapz(np.interp(x, mrec, mpre), x)  # integrate
+        print("ap",ap[ci])
 
     # Compute F1 score (harmonic mean of precision and recall)
     f1 = 2 * p * r / (p + r + 1e-16)
     return p, r, ap, f1, unique_cls.astype('int32')
+
+def get_xywh_loss(pred_xywh,true_xywh,mask,anchors):
+    pred_xy, pred_wh = tf.split(pred_xywh,[2,2],-1)
+    true_xy, true_wh = tf.split(true_xywh,[2,2],-1)
+    
+    pred_xy = pred_xy - tf.floor(true_xy)
+    true_xy = true_xy - tf.floor(true_xy)
+    xy_loss = tf.reduce_sum(tf.clip_by_value(tf.where(mask,tf.square(pred_xy-true_xy),0.),0.,1e3))
+    
+    pred_wh = tf.math.log(tf.clip_by_value(tf.math.divide_no_nan(pred_wh,anchors),1e-10,1e3))
+    pred_wh = tf.where(tf.math.is_inf(pred_wh),
+                           tf.zeros_like(pred_wh), pred_wh) 
+    true_wh = tf.math.log(tf.clip_by_value(tf.math.divide_no_nan(true_wh,anchors),1e-10,1e3))
+    true_wh = tf.where(tf.math.is_inf(true_wh),
+                           tf.zeros_like(true_wh), true_wh)    
+    wh_loss = tf.reduce_sum(tf.clip_by_value(tf.where(mask,tf.square(pred_wh-true_wh),0.),0.,1e3))
+    return xy_loss + wh_loss
+
+
+def freeze_layer(YOLO,args):
+    if args.partial:
+        print('partial weight')
+        if args.is_tiny:
+            num=16
+        else:
+            num=92
+        
+        for layer in YOLO.model.layers:
+            try:
+                layer_num =  int(layer.name.split('_')[-1])
+            except:
+                layer_num = 0
+
+            if ('batch_normalization' in layer.name or 'conv2d' in layer.name) and num<layer_num:
+                layer.trainable=True
+            else:
+                layer.trainable=False
+    elif args.freeze_conv:
+        print('freeze_conv')
+        for layer in YOLO.backbone.layers:
+            layer.trainable = False
+    else:
+        pass

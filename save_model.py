@@ -8,12 +8,11 @@ def freeze_all(model, frozen=True):
         for l in model.layers:
             freeze_all(l, frozen)
 
-def save(args):
-
+def save(args,hyp):
     if args.is_tiny:
-        YOLO = YOLOv4.YOLOv4_tiny(args)
+        YOLO = YOLOv4.YOLOv4_tiny(args,hyp)
     else:
-        YOLO = YOLOv4.YOLOv4(args)
+        YOLO = YOLOv4.YOLOv4(args,hyp)
 
     if args.weight_path!='':
         if args.is_darknet_weight:
@@ -45,5 +44,29 @@ if __name__== '__main__':
     parser.add_argument('--out_path', type=str, default='./saved_model/model')
     args = parser.parse_args()
     args.batch_size= 1
-    args.mode = 'test'
-    save(args)
+    args.mode = 'eval'
+
+    hyp = {'giou': 1.0,#3.54,  # giou loss gain
+           'cls': 1.0,#37.4,  # cls loss gain
+           'cls_pw' : 1.0,
+           'obj': 1.0,#83.59,  # obj loss gain (=64.3*img_size/320 if img_size != 320)
+           'obj_pw' : 1.0,
+           'iou_t': 0.213,  # iou training threshold
+           'lr0': 0.0013,  # initial learning rate (SGD=5E-3, Adam=5E-4)
+           'lrf': 0.00013,  # final learning rate (with cos scheduler)
+           'momentum': 0.949,  # SGD momentum
+           'fl_gamma': 2.0,  # focal loss gamma (efficientDet default is gamma=1.5)
+           'hsv_h': 0.0138,  # image HSV-Hue augmentation (fraction)
+           'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)
+           'hsv_v': 0.36,  # image HSV-Value augmentation (fraction)
+           'degrees': 0,#1.98,#10.0,#1.98 * 0,  # image rotation (+/- deg)
+           'translate':0.5, #0.1,#0.05 * 0,  # image translation (+/- fraction)
+           'scale':0.1,  # image scale (+/- gain)
+           'shear':0,# 0.1,#0.641 * 0}  # image shear (+/- deg)
+           'ignore_threshold': 0.7,
+           'border' : 2,
+           'flip_lr' : 0.5,
+           'flip_ud' : 0.0,
+           'soft' : 0.0
+           }
+    save(args,hyp)
