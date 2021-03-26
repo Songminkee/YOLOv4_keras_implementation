@@ -46,32 +46,29 @@ class YOLOv4(object):
         x = tf.concat([conv2d(r3, 128, 1, activation='leaky'),x], -1)
         route2 = convset(x, 128)
         box1 = conv2d(route2, 256, 3, activation='leaky')
-        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,#if self.num_classes>1 else 3*5, 1,
-                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                      #kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                                        bias_initializer=tf.constant_initializer(0.),
-                                      kernel_initializer=tf.keras.initializers.RandomUniform(minval=-0.002, maxval=0.002)#tf.random_normal_initializer(stddev=0.01)
-                                      )(box1)
+        box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,
+                                    kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                    bias_initializer=tf.constant_initializer(0.),
+                                    kernel_initializer=tf.random_normal_initializer(stddev=0.01)
+                                    )(box1)
         
         x = tf.concat([conv2d(route2, 256, 3, 2, activation='leaky'),route1], -1)
         route3 = convset(x, 256)
         box2 = conv2d(route3, 512, 3, activation='leaky')
-        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,#if self.num_classes>1 else 3*5, 1,
-                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                      #kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                                        bias_initializer=tf.constant_initializer(0.),
-                                       kernel_initializer=tf.keras.initializers.RandomUniform(minval=-0.002, maxval=0.002)#tf.random_normal_initializer(stddev=0.01)
-                                      )(box2)
+        box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,
+                                    kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                    bias_initializer=tf.constant_initializer(0.),
+                                    kernel_initializer=tf.random_normal_initializer(stddev=0.01)
+                                    )(box2)
 
         x = tf.concat([ conv2d(route3, 512, 3, 2, activation='leaky'),r1], -1)
         x = convset(x, 512)
         box3 = conv2d(x, 1024, 3, activation='leaky')
-        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,#if self.num_classes>1 else 3*5, 1,
-                                        kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                        #kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                                        bias_initializer=tf.constant_initializer(0.),
-                                      kernel_initializer=tf.keras.initializers.RandomUniform(minval=-0.002, maxval=0.002)#tf.random_normal_initializer(stddev=0.01)
-                                      )(box3)
+        box3 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5) ,1,
+                                    kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                    bias_initializer=tf.constant_initializer(0.),
+                                    kernel_initializer=tf.random_normal_initializer(stddev=0.01)
+                                    )(box3)
         return [box1,box2,box3]
 
     def pred(self, boxes):
@@ -97,8 +94,7 @@ class YOLOv4(object):
             pred_wh = (tf.exp(wh) * self.anchors[i])
             if self.mode!='eval':
                 pred_xy  *= self.stride[i]
-                pred_wh *= self.stride[i
-                ] 
+                pred_wh *= self.stride[i] 
             pred_conf = tf.sigmoid(conf)
             pred.append(tf.concat([pred_xy, pred_wh, pred_conf, pred_cls], -1))
         if self.mode!='eval':
@@ -114,7 +110,6 @@ class YOLOv4(object):
         label_box,obj_mask,label_cls = tf.split(label,[4,1,self.num_classes],axis=-1)
 
         giou = tf.expand_dims(get_iou_loss(pred_box, label_box,method='CIoU'),axis=-1)
-        #bbox_loss_scale = 2.0 - 1.0 * label_box[:, :, :, :, 2:3] * label_box[:, :, :, :, 3:4] / (self.img_size ** 2)
         l_iou = obj_mask  * (1-giou) #* bbox_loss_scale
 
         iou = get_iou_loss(pred_box[:,:,:,:,np.newaxis,:],box[:,np.newaxis,np.newaxis,np.newaxis,:,:],method='IoU')
@@ -142,7 +137,7 @@ class YOLOv4(object):
                 tf.summary.scalar("num_thre_{}".format(i),tf.reduce_sum(1-(no_obj_mask+obj_mask)), step=step)
                 tf.summary.scalar("num_obj_{}".format(i),tf.reduce_sum(obj_mask), step=step)
         
-        l_iou = tf.reduce_mean(tf.reduce_sum(l_iou,axis=[1,2,3,4]))
+        l_iou =tf.reduce_mean(tf.reduce_sum(l_iou,axis=[1,2,3,4]))
         l_object = tf.reduce_mean(tf.reduce_sum(l_object,axis=[1,2,3,4]))
         l_cls = tf.reduce_mean(tf.reduce_sum(l_cls,axis=[1,2,3,4]))
         
@@ -184,18 +179,20 @@ class YOLOv4_tiny(object):
 
         box2 = conv2d(x, 512, 3, activation='leaky')
         box2 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
-                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01)
-                                      )(box2)
+                                    kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                    bias_initializer=tf.constant_initializer(0.),
+                                    kernel_initializer=tf.random_normal_initializer(stddev=0.01)
+                                    )(box2)
 
         x = conv2d(x, 128, 1, activation='leaky')
         x = upsample(x)
         x = tf.concat([x, r1], -1)
         box1 = conv2d(x, 256, 3, activation='leaky')
         box1 = tf.keras.layers.Conv2D(3 * (self.num_classes + 5), 1,
-                                      kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01)
-                                      )(box1)
+                                    kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                    bias_initializer=tf.constant_initializer(0.),
+                                    kernel_initializer=tf.random_normal_initializer(stddev=0.01)
+                                    )(box1)
         return [box1, box2]
 
     def pred(self,boxes):
@@ -237,7 +234,6 @@ class YOLOv4_tiny(object):
         label_box,obj_mask,label_cls = tf.split(label,[4,1,self.num_classes],axis=-1)
 
         giou = tf.expand_dims(get_iou_loss(pred_box, label_box,method='CIoU'),axis=-1)
-        #bbox_loss_scale = 2.0 - 1.0 * label_box[:, :, :, :, 2:3] * label_box[:, :, :, :, 3:4] / (self.img_size ** 2)
         l_iou = obj_mask  * (1-giou) #* bbox_loss_scale
 
         iou = get_iou_loss(pred_box[:,:,:,:,np.newaxis,:],box[:,np.newaxis,np.newaxis,np.newaxis,:,:],method='IoU')

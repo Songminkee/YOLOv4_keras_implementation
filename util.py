@@ -4,20 +4,8 @@ import numpy as np
 import math
 import os
 
-# class BatchNormalization(tf.keras.layers.BatchNormalization):
-#     # "Frozen state" and "inference mode" are two separate concepts.
-#     # `layer.trainable = False` is to freeze the layer, so the layer will use
-#     # stored moving `var` and `mean` in the "inference mode", and both `gama`
-#     # and `beta` will not be updated !
-#     def call(self, x, training=False):
-#         if not training:
-#             training = tf.constant(False)
-#         training = tf.logical_and(training, self.trainable)
-#         return super().call(x, training)
-
 def mish(x,name):
     return x * tf.math.tanh(tf.math.softplus(x))
-#    return x * tf.nn.tanh( tf.nn.softplus(x),name=name)
 
 def upsample(x):
     return tf.image.resize(x, (x.shape[1] * 2, x.shape[2] * 2), method='bilinear')
@@ -26,28 +14,22 @@ def conv2d(x,filter,kernel,stride=1,name=None,activation='mish',gamma_zero=False
     if stride==1:
         x = tf.keras.layers.Conv2D(filter,kernel,stride,padding='same',use_bias=False,
                                kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                               #kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                               kernel_initializer=tf.keras.initializers.RandomUniform(minval=-0.002, maxval=0.002)#tf.random_normal_initializer(stddev=0.01)
+                               kernel_initializer=tf.random_normal_initializer(stddev=0.01),
                                )(x)
     else:
         x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
         x = tf.keras.layers.Conv2D(filter, kernel, stride, padding='valid', use_bias=False,
                                    kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                   #kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                                   kernel_initializer=tf.keras.initializers.RandomUniform(minval=-0.002, maxval=0.002)#tf.random_normal_initializer(stddev=0.01)
+                                   kernel_initializer=tf.random_normal_initializer(stddev=0.01),
                                    )(x)
 
-    # if gamma_zero:
-    #     x = tf.keras.layers.BatchNormalization(momentum=0.03, epsilon=1e-3,gamma_initializer='zeros')(x)
-    # else:
-    # x = BatchNormalization()(x)
     x = tf.keras.layers.BatchNormalization(momentum=0.9,epsilon=1e-5)(x)
-    #x = tf.keras.layers.BatchNormalization( momentum=0.03, epsilon=1e-4)(x)
+
     if activation=='mish':
         return mish(x,name)
     elif activation=='leaky':
-        return tf.keras.layers.LeakyReLU(alpha=0.1)(x)#(conv)#tf.nn.leaky_relu(x, alpha=0.1)#tf.keras.layers.LeakyReLU(name=name,alpha=0.1)(x)
-
+        return tf.keras.layers.LeakyReLU(alpha=0.1)(x)
+        
 def convset(x, filter):
     x = conv2d(x, filter, 1,activation='leaky')
     x = conv2d(x, filter * 2, 3,activation='leaky')
@@ -88,7 +70,7 @@ def default_stride(is_tiny=False):
 
 def default_anchor(is_tiny=False):
     if is_tiny:
-        return np.array([23,27, 37,58, 81,82, 81,82, 135,169, 344,319])
+        return np.array([10, 14, 23,27, 37,58, 81,82, 135,169, 344,319])
     return np.array([12, 16, 19, 36, 40, 28, 36, 75, 76, 55, 72, 146, 142, 110, 192, 243, 459, 401])
 
 def default_sigmoid_scale(is_tiny=False):
@@ -420,28 +402,22 @@ def ap_per_class(tp,conf,pred_cls,label_cls):
         # Accumulate FPs and TPs
         fpc = np.cumsum(1-tp[i])
         tpc = np.cumsum(tp[i])
-        print("fpc",fpc)
-        print("tpc",tpc)
+
         # Recall
         recall = tpc / (n_gt + 1e-16)  # recall curve
         r[ci] = np.interp(-0.1, -conf[i], recall)  # r at pr_score, negative x, xp because xp decreases
-        print(conf[i],recall)
-        print("r[ci]",r[ci])
+
         # Precision
         precision = tpc / (tpc + fpc)
         p[ci] = np.interp(-0.1, -conf[i], precision)
 
         mrec = np.concatenate(([0.], recall, [min(recall[-1] + 1E-3, 1.)]))
-        print("mrec",mrec)
         mpre = np.concatenate(([0.], precision, [0.]))
-        print("precision",precision)
-        print("mpre",mpre)
+        
         # Compute the precision envelope
         mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
-        print("flip",mpre)
         x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
         ap[ci] = np.trapz(np.interp(x, mrec, mpre), x)  # integrate
-        print("ap",ap[ci])
 
     # Compute F1 score (harmonic mean of precision and recall)
     f1 = 2 * p * r / (p + r + 1e-16)

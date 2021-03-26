@@ -57,18 +57,21 @@ def train(args,hyp):
         print('train epochs : {}'.format(args.epochs))
         total_steps = args.epochs * steps_per_epoch + warmup_steps
     print('total_steps : {}'.format(total_steps))
-
-    train_set = tf.data.Dataset.from_generator(train_set,(tf.float32,tf.float32,tf.float32,tf.float32,tf.float32,tf.float32,tf.float32))
-    train_set = train_set.batch(args.batch_size).repeat(1)
-
-    val_set = tf.data.Dataset.from_generator(val_set,(tf.float32,tf.float32,tf.float32,tf.float32,tf.float32,tf.float32,tf.float32))
-    val_set=val_set.batch(args.batch_size).repeat(1)
-
+    
+    out_type=[tf.float32]
     if args.is_tiny:
         YOLO = YOLOv4.YOLOv4_tiny(args,hyp)
+        out_type= tuple(out_type*5)
     else:
         YOLO = YOLOv4.YOLOv4(args, hyp)
+        out_type= tuple(out_type*7)
     
+    train_set = tf.data.Dataset.from_generator(train_set,out_type)
+    train_set = train_set.batch(args.batch_size).repeat(1)
+
+    val_set = tf.data.Dataset.from_generator(val_set,out_type)
+    val_set=val_set.batch(args.batch_size).repeat(1)
+
     # load pretrained model
     if args.weight_path!='':
         if args.is_darknet_weight:
@@ -95,7 +98,7 @@ def train(args,hyp):
             os.makedirs(args.log_path)
         writer = tf.summary.create_file_writer(args.log_path)
     print('-' * 10)
-
+    
     #train function
     @tf.function
     def train_step(images, labels,boxs, YOLO, accum_gradient,cnt):
@@ -211,7 +214,6 @@ def train(args,hyp):
                 val_boxs = [s_box, l_box]
                 validation_loss += test_step(val_images, val_labels,val_boxs,YOLO)
                 val_cnt+=1
-
         else:
             for val_images, s_label, m_label, l_label, s_box, m_box, l_box in train_set:
                 val_labels = [s_label,m_label,l_label]
@@ -326,13 +328,13 @@ if __name__== '__main__':
     parser.add_argument('--num_classes', type=int, help='Number of classes (in COCO 80) / default : 80', default=80)
     
     args = parser.parse_args()
-    hyp = {'giou': 1.0,#3.54,  # giou loss gain
+    hyp = {'giou': 1.00,#3.54,  # giou loss gain
            'cls': 1.0,#37.4,  # cls loss gain
            'cls_pw' : 1.0,
            'obj': 1.0,#83.59,  # obj loss gain (=64.3*img_size/320 if img_size != 320)
            'obj_pw' : 1.0,
-           'iou_t': 0.213,  # iou training threshold
-           'lr0': 0.0013,  # initial learning rate (SGD=5E-3, Adam=5E-4)
+           'iou_t': 1.0,  # iou training threshold
+           'lr0': 0.0013,  # initial learning rate (SGD=1.3E-3, Adam=1.3E-4)
            'lrf': 0.00013,  # final learning rate (with cos scheduler)
            'momentum': 0.949,  # SGD momentum
            'fl_gamma': 2.0,  # focal loss gamma (efficientDet default is gamma=1.5)
