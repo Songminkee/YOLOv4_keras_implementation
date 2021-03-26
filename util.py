@@ -29,7 +29,7 @@ def conv2d(x,filter,kernel,stride=1,name=None,activation='mish',gamma_zero=False
         return mish(x,name)
     elif activation=='leaky':
         return tf.keras.layers.LeakyReLU(alpha=0.1)(x)
-        
+
 def convset(x, filter):
     x = conv2d(x, filter, 1,activation='leaky')
     x = conv2d(x, filter * 2, 3,activation='leaky')
@@ -391,7 +391,7 @@ def ap_per_class(tp,conf,pred_cls,label_cls):
 
     tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
     unique_cls = np.unique(label_cls)
-    ap,p,r = np.zeros(len(unique_cls)) , np.zeros(len(unique_cls)), np.zeros(len(unique_cls))
+    ap,p,r = np.zeros((len(unique_cls),tp.shape[1])) , np.zeros((len(unique_cls),tp.shape[1])), np.zeros((len(unique_cls),tp.shape[1]))
     for ci, c in enumerate(unique_cls):
         i = pred_cls == c
         n_gt = np.sum(label_cls==c) # tp+nf, 실제 정답의 개수
@@ -400,24 +400,34 @@ def ap_per_class(tp,conf,pred_cls,label_cls):
         if not n_gt or not n_p:
             continue
         # Accumulate FPs and TPs
-        fpc = np.cumsum(1-tp[i])
-        tpc = np.cumsum(tp[i])
-
+        fpc = np.cumsum(1-tp[i],axis=0)
+        tpc = np.cumsum(tp[i],axis=0)
+        
         # Recall
         recall = tpc / (n_gt + 1e-16)  # recall curve
-        r[ci] = np.interp(-0.1, -conf[i], recall)  # r at pr_score, negative x, xp because xp decreases
+        r[ci] = np.interp(-0.1, -conf[i], recall[:,0])  # r at pr_score, negative x, xp because xp decreases
 
         # Precision
         precision = tpc / (tpc + fpc)
-        p[ci] = np.interp(-0.1, -conf[i], precision)
+        p[ci] = np.interp(-0.1, -conf[i], precision[:,0])
 
-        mrec = np.concatenate(([0.], recall, [min(recall[-1] + 1E-3, 1.)]))
-        mpre = np.concatenate(([0.], precision, [0.]))
+        for j in range(tp.shape[1]):
+            rj = recall[:,j]
+            pj = precision[:,j]
+            mrec = np.concatenate(([0.], rj, [min(rj[-1] + 1E-3, 1.)]))
+            mpre = np.concatenate(([0.], pj, [0.]))
+
+            mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
+            x = np.linspace(0, 1, 101)
+            ap[ci, j] = np.trapz(np.interp(x, mrec, mpre), x)
+
+        # mrec = np.concatenate(([0.], recall, [min(recall[-1] + 1E-3, 1.)]))
+        # mpre = np.concatenate(([0.], precision, [0.]))
         
-        # Compute the precision envelope
-        mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
-        x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
-        ap[ci] = np.trapz(np.interp(x, mrec, mpre), x)  # integrate
+        # # Compute the precision envelope
+        # mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
+        # x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
+        # ap[ci] = np.trapz(np.interp(x, mrec, mpre), x)  # integrate
 
     # Compute F1 score (harmonic mean of precision and recall)
     f1 = 2 * p * r / (p + r + 1e-16)

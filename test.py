@@ -123,7 +123,7 @@ def test(args,hyp,test_set):
         boxes, scores, classes, valid_detections = inference(xywh, cls, args)
               
         label[:, 1:] = scaled_xywh2xyxy(label[:, 1:], h0, w0)
-        positive = np.zeros((valid_detections[0].numpy()), dtype=np.bool)
+        positive = np.zeros((valid_detections[0].numpy(),10), dtype=np.bool)
         detected = []
         y_min, x_min, y_max, x_max = convert_to_origin_shape(boxes[0], pad, ratio, h0, w0, h, w, args.letter_box)
         
@@ -134,8 +134,11 @@ def test(args,hyp,test_set):
             mask = tf.cast(label[:, 0], tf.int8) == tf.cast(classes[0][i], tf.int8)
             max_iou, max_idx = tf.reduce_max(tf.where(mask, ious[i], 0), -1), tf.argmax(tf.where(mask, ious[i], 0), -1)
             max_iou, max_idx = max_iou.numpy(), max_idx.numpy()
-            if max_iou >= 0.5 and max_idx not in detected:
-                positive[i] = True
+            if max_iou < 0.5: continue
+            if max_idx not in detected:
+                # print(max_iou)
+                # print(np.linspace(0.5,0.95,10))
+                positive[i] = max_iou >= np.linspace(0.5,0.95,10)
                 detected.append(max_idx)
 
         result.append(
@@ -148,25 +151,28 @@ def test(args,hyp,test_set):
 
     result = [np.concatenate(x, 0) for x in zip(*result)]
     p, r, ap, f1, ap_class = ap_per_class(*result)
-    mp, mr, map, mf1 = p.mean(), r.mean(), ap.mean(), f1.mean()
+    p, r,f1 = p[:,0], r[:,0],f1[:,0]
+    mp, mr, map50,map, mf1 = p.mean(), r.mean(), ap[:,0].mean(), ap.mean(1), f1.mean()
     nt = np.bincount(result[3].astype(np.int64), minlength=args.num_classes)
-
+    ap = ap[:,0]
     # Print results
     if not os.path.exists(args.weight_path.replace('.','result')):
             os.makedirs(args.weight_path.replace('.','result'))
     f = open(args.weight_path.replace('.','result')+'/ret.txt','w')
     
-    pf = '%20s' + '%10.3g' * 5  # print format
-    pc = '%20s' + '%10.5s' + '%10.3s' * 4
-    print(pc % ('', 'Total', 'mP', 'mR', 'mAP', 'mF1'))
-    print(pf % ('all', nt.sum(), mp, mr, map, mf1), '\n')
-    print(pc % ('Class', 'Total', 'P', 'R', 'AP', 'F1'))
-    f.writelines(pc % ('', 'Total', 'mP', 'mR', 'mAP', 'mF1')+'\n')
-    f.writelines(pf % ('all', nt.sum(), mp, mr, map, mf1)+ '\n')
-    f.writelines(pc % ('Class', 'Total', 'P', 'R', 'AP', 'F1'))
+    pf = '%10s' + '%13.3g' * 6  # print format
+    pc = '%10s' + '%13.5s' + '%13.10s' * 5
+    pf2 = '%10s' + '%13.3g' * 5
+    pc2 = '%10s' + '%13.5s' + '%13.5s' * 4
+    print(pc % ('', 'Total', 'mP', 'mR', 'mAP@50','mAP@.5:.95', 'mF1'))
+    print(pf % ('all', nt.sum(), mp, mr, map50, map, mf1), '\n')
+    print(pc2 % ('Class', 'Total', 'P', 'R', 'AP@50', 'F1'))
+    f.writelines(pc % ('', 'Total', 'mP', 'mR', 'mAP@50','mAP@50:90', 'mF1')+'\n')
+    f.writelines(pf % ('all', nt.sum(), mp, mr, map50, map, mf1)+ '\n')
+    f.writelines(pc2 % ('Class', 'Total', 'P', 'R', 'AP@50', 'F1'))
     for i, c in enumerate(ap_class):
-        print(pf % (names[c], nt[c], p[i], r[i], ap[i], f1[i]))
-        f.writelines(pf % (names[c], nt[c], p[i], r[i], ap[i], f1[i])+'\n')
+        print(pf2 % (names[c], nt[c], p[i], r[i], ap[i], f1[i]))
+        f.writelines(pf2 % (names[c], nt[c], p[i], r[i], ap[i], f1[i])+'\n')
     f.close()
     return mp, mr
 
